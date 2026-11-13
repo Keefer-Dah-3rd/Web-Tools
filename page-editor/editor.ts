@@ -111,11 +111,17 @@ const STYLE = `
 .bar.on .head .dot { background: #3ea0ff; box-shadow: 0 0 0 3px rgba(62, 160, 255, 0.25); }
 .body { overflow-y: auto; overflow-x: hidden; padding: 10px 12px 4px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .body > div, .tools > div, .fold-body > div { min-width: 0; }
-.fold-head { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: 0; padding: 4px 0; min-height: 24px; color: #8b95a5; font: 600 10px/1.2 inherit; font-family: inherit; letter-spacing: 0.09em; text-transform: uppercase; text-align: left; }
-.fold-head:hover { background: none; color: #e9edf3; }
-.fold-head em { font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 500; color: #c5ccd8; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%; }
-.caret { display: inline-block; transition: transform 0.15s; }
+.fold-head { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 38px; padding: 7px 10px 7px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.14); color: #f3f6fa; font: 700 12.5px/1.2 inherit; font-family: inherit; letter-spacing: 0.02em; text-align: left; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.fold-head:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(62, 160, 255, 0.55); }
+.fold-head:focus-visible { outline: 2px solid #3ea0ff; outline-offset: 2px; }
+.fold.open > .fold-head { border-color: rgba(62, 160, 255, 0.45); background: rgba(62, 160, 255, 0.1); }
+.fold-head em { font-style: normal; font-weight: 600; font-size: 11px; color: #bfe0ff; background: rgba(62, 160, 255, 0.16); border-radius: 999px; padding: 2px 8px; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 58%; }
+.caret { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #3ea0ff; color: #04121f; font-size: 11px; font-weight: 800; line-height: 1; transition: transform 0.15s; }
 .fold.open > .fold-head .caret { transform: rotate(90deg); }
+.fold.open > .fold-body { padding-top: 10px; }
+.rw .fold-head:hover, .rw .fold.open > .fold-head { border-color: rgba(255, 176, 46, 0.6); background: rgba(255, 176, 46, 0.1); }
+.rw .caret { background: #ffb02e; color: #1b1200; }
+.rw .fold-head em { color: #ffd99a; background: rgba(255, 176, 46, 0.16); }
 .fold:not(.open) > .fold-body { display: none; }
 .fold-body > div + div { margin-top: 12px; }
 .rw .fold { margin-bottom: 6px; }
@@ -886,7 +892,7 @@ export function mountEditor(options: EditorOptions | string): void {
     root.querySelectorAll<HTMLElement>("[data-act=pass]").forEach((b) => b.toggleAttribute("disabled", !!rwBusy));
     root.querySelectorAll<HTMLElement>("[data-chip]").forEach((b) => b.setAttribute("aria-pressed", String(mood.picks.includes(b.dataset.chip!))));
     root.querySelectorAll<HTMLElement>("[data-fold]").forEach((f) => f.classList.toggle("open", open.includes(f.dataset.fold!)));
-    $(".sel-sum").textContent = picked ? nameOf(picked) : "nothing";
+    $(".sel-sum").textContent = picked ? (textOf(picked) ? `“${textOf(picked).slice(0, 28)}${textOf(picked).length > 28 ? "…" : ""}”` : nameOf(picked)) : "nothing yet";
     $(".mood-sum").textContent = [mood.words.trim() && `“${mood.words.trim().slice(0, 24)}${mood.words.trim().length > 24 ? "…" : ""}”`, ...mood.picks].filter(Boolean).join(", ") || "none";
     bar.classList.toggle("targeting", targeting);
     $("[data-act=target]").setAttribute("aria-pressed", String(targeting));
