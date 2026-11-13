@@ -6,6 +6,7 @@ words can be worked on where they'll be seen, not in an editor or a chat window.
 | Tool | What it does |
 |---|---|
 | [`page-editor`](#page-editor) | A floating toolbar on any page in development. Pick something, then remove, resize, restyle, recolour or retype it, or have Claude rewrite its words. Save hands the edits to Claude to make permanent in the code. |
+| [`live-editor`](#live-editor) | The same toolbar on a published site, opened by a bookmark that only works for you. Save hands the edits to Claude to make permanent and publish. |
 
 ## Try it
 
@@ -130,3 +131,43 @@ save's `savedAt`; the page then drops its live edits and reloads.
 `page-editor/briefs/default.md` is what Claude is told, every time. Copy it, describe your
 project at the top, and point `brief` at the copy. The instant check in `page-editor/slop.ts`
 follows the same list; keep the two in step.
+
+## Live editor
+
+A second version of the page editor for a site that's already published, kept separate so
+projects using the dev toolbar aren't affected. It's the same toolbar (Select, Style, Edit text,
+Rewrite with AI, Pick blocks, Save), opened by a bookmark and backed by a helper on your Mac.
+
+```bash
+npm run live
+```
+
+Then open <http://127.0.0.1:5199> and drag **✎ Edit page** to Chrome's bookmarks bar. On any
+page of the site, click it. The first time, Chrome asks whether the site may connect to
+devices on your local network: allow it (that's the helper).
+
+**Only you see it.** Nothing is added to the site. The toolbar loads only from your bookmark,
+only while the helper runs on your Mac, and the keefedesign.com setup also refuses to open
+unless you're signed in to the site's WordPress in that browser. The helper listens on
+127.0.0.1 and answers saves and rewrites only from the site's own address.
+
+| File | What it is |
+|---|---|
+| `live-editor/editor.ts` | The toolbar. Adds `scope` (edit only inside one element, or its shadow root, e.g. an embed) and live saving to the page editor's. |
+| `live-editor/server.mjs` | The helper: serves the toolbar (bundled on each load), saves and rewrites. |
+| `live-editor/core.mjs` | Saves and rewrites, as in the page editor, plus per-page briefs and facts. |
+| `live-editor/sites/keefedesign.*` | keefedesign.com: the entry (`.ts`), the helper config (`.json`) and the site's rewrite brief. |
+
+On keefedesign.com each page saves under an id from its address (`/project/coco` →
+`project-coco`, `/` → `home`) to `live-editor/edits/keefedesign/<page>.json`. On the Coco case
+study the toolbar edits inside the Coco embed and rewrites use that project's brief and facts;
+elsewhere it edits the whole page.
+
+Saves carry `"live": true` and no JSX source lines, so Claude matches them by text and
+selector (inside a shadow root, selectors start with `:host >`). Claude makes the change where
+it lives (the embed's source, rebuilt and re-uploaded, or the page's Semplice content), publishes
+it, and only then writes `<page>.applied.json`. The page then reloads past the site's cache;
+click the bookmark again to carry on.
+
+To add another site, copy `sites/keefedesign.ts` and `.json`, change `origins` and the entry,
+and run `node live-editor/server.mjs live-editor/sites/<site>.json`.

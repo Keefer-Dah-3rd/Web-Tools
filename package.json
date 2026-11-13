@@ -13,9 +13,11 @@
   "scripts": {
     "demo": "vite demo --port 5190",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "live": "node live-editor/server.mjs live-editor/sites/keefedesign.json"
   },
   "devDependencies": {
+    "esbuild": "0.25.12",
     "typescript": "5.8.3",
     "vite": "6.4.5"
   }

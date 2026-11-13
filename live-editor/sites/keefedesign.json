@@ -1,0 +1,14 @@
+{
+  "entry": "keefedesign.ts",
+  "origins": ["https://keefedesign.com"],
+  "port": 5199,
+  "editsDir": "../edits/keefedesign",
+  "brief": "keefedesign-brief.md",
+  "facts": [],
+  "pages": {
+    "project-coco": {
+      "brief": "../../page-editor/presets/keefedesign-brief.md",
+      "facts": ["../../../ai_buddy/web/coco-web/concepts/src/shared/facts.ts"]
+    }
+  }
+}

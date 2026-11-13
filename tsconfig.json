@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["page-editor/**/*.ts", "demo/**/*.ts"]
+  "include": ["page-editor/**/*.ts", "live-editor/**/*.ts", "demo/**/*.ts"]
 }
