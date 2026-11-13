@@ -99,10 +99,12 @@ function setPromptFor(cfg, req) {
     ...list(req.headings, 40, 120).map((h) => `- ${h}`),
     "",
     "## Rewrite these together",
-    "This is one pass over the page's headings. Write them as a set: across the set, vary the shape",
-    "(a plain fact, a number, a first-person line, a short label, a small moment) so no two headings",
-    "in your first options share a formula, and the page doesn't read as one template repeated.",
-    "Put your strongest option for each heading first. Answer with the same ids.",
+    items.length === 1
+      ? "One block of text the author picked on the page."
+      : `${items.length} blocks of text the author picked on the page. Write them as a set: across the set, vary the shape (a plain fact, a number, a first-person line, a short label, a small moment) so no two of your first options share a formula, and the page doesn't read as one template repeated.`,
+    "Match each block's role: a heading stays heading-length; a paragraph stays a paragraph of",
+    "about the same length, keeping every fact it states, unless the mood asks for Shorter.",
+    "Put your strongest option for each block first. Answer with the same ids.",
     "",
     ...items.map((it) =>
       [
@@ -120,7 +122,7 @@ function setPromptFor(cfg, req) {
     mood.length ? `Picked: ${mood.join(", ")}` : "Picked: (nothing)",
     words ? `In their words: "${words}"` : "",
     "",
-    `Write ${per} options for each heading. Give one diagnosis sentence for the set as it stands.`,
+    `Write ${per} options for each block. Give one diagnosis sentence for what's there now; call blocks "block 1", "block 2" (their id numbers), never by id.`,
   ]
     .filter((line) => line !== "")
     .join("\n");
@@ -225,7 +227,7 @@ async function askSession(cfg, system, prompt, schema) {
 
 async function rewrite(cfg, req) {
   const system = briefFrom(cfg.brief);
-  const set = req.mode === "headings";
+  const set = req.mode === "set" || req.mode === "headings";
   const prompt = set ? setPromptFor(cfg, req) : promptFor(cfg, req);
   const schema = set ? SET_SCHEMA : SCHEMA;
   const cli = await askCli(cfg, system, prompt, schema);
@@ -290,7 +292,7 @@ export function pageEditor(options = {}) {
           } catch {
             return reply(400, { error: "not JSON" });
           }
-          const empty = data.mode === "headings" ? !(Array.isArray(data.items) && data.items.length) : !clip(data.text, 600);
+          const empty = data.mode === "set" || data.mode === "headings" ? !(Array.isArray(data.items) && data.items.length) : !clip(data.text, 600);
           if (empty) return reply(400, { error: "No text to rewrite." });
           try {
             const answer = await rewrite(cfg, data);

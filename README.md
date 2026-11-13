@@ -77,17 +77,26 @@ project's colours; `presets/keefedesign-brief.md` is the Coco case study's brief
 ### Using the toolbar
 
 - **Select** (or `E`), then click anything. `↑` `↓` step out and in. `Delete` removes.
-- **Text size**, **Type style**, **Colour** (text or fill), **Shrink / grow**.
+- **Style**: text size, type style, colour (text or fill), shrink / grow.
 - **Edit text**: double-click words (or `T`) and type. `Enter` keeps it, `⇧Enter` adds a line
   break, `Esc` cancels, **Original text** puts it back.
-- **Rewrite with AI** (the orange box). Describe the mood and/or tap quick picks, then:
+- **Rewrite with AI** (the orange box). Open **Mood** to describe the mood and/or tap quick
+  picks (the line shows what's set while folded), then choose what to rewrite:
+  - **◎ Pick blocks** (or `B`): click any text on the page (a paragraph, heading, list item,
+    quote or label) to add it; each gets a numbered marker, click again to drop it. Then
+    **✦ Rewrite this block** gives five options, or **✦ Rewrite these N** gives three for each,
+    written as a set. Paragraphs stay paragraphs and keep their facts unless you pick Shorter.
   - **✦ All headings** rewrites every heading that reads as AI as one set, three options each,
-    so they don't all follow one formula. Click an option under each heading to use it.
-  - **✦ Selected** (or `R`) rewrites what you picked, five options; **More, different** asks
-    for five more.
-  - Headings, selections and every option are checked on the spot for patterns that make copy
-    read as machine-written: template headings ("Meet X", "Built for X"), -ing headings,
-    "X, not Y" slogans, clipped fragments, empty words, em dashes, Title Case.
+    so they don't all follow one formula.
+  - With an element chosen in **Select** mode, **✦ Write 5 options** (or `R`) rewrites it;
+    **More, different** asks for five more.
+  - Click an option to put it on the page; **Again** asks for fresh ones. Headings, chosen text
+    and every option are checked on the spot for patterns that make copy read as
+    machine-written: template headings ("Meet X", "Built for X"), -ing headings, "X, not Y"
+    slogans, clipped fragments, empty words, em dashes, Title Case.
+- Sections fold: **Selected**, **Style** (size, type style, colour, scale), **Mood** and
+  **Shortcuts** open with a click on their heading. Style, Mood and Shortcuts start folded;
+  the toolbar remembers what you leave open.
 - **Changes** lists every edit with ✕ to revert; `⌘Z` undoes. **Save** (`⌘S`) writes them to
   `<editsDir>/<page>.json` with each element's source file and line (React dev builds).
 

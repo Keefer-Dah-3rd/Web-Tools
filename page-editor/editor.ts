@@ -91,6 +91,7 @@ const SHAPES = ["Shorter", "Use a number", "Say what happened", "First person", 
 const STYLE = `
 :host { all: initial; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 .box { position: fixed; pointer-events: none; z-index: 2147483000; border-radius: 3px; display: none; }
 .box.hover { outline: 1.5px dashed #3ea0ff; outline-offset: 1px; }
 .box.pick { outline: 2px solid #3ea0ff; outline-offset: 1px; }
@@ -109,13 +110,22 @@ const STYLE = `
 .head .dot { width: 8px; height: 8px; border-radius: 50%; background: #5b6472; }
 .bar.on .head .dot { background: #3ea0ff; box-shadow: 0 0 0 3px rgba(62, 160, 255, 0.25); }
 .body { overflow-y: auto; overflow-x: hidden; padding: 10px 12px 4px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.body > div, .tools > div { min-width: 0; }
+.body > div, .tools > div, .fold-body > div { min-width: 0; }
+.fold-head { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: 0; padding: 4px 0; min-height: 24px; color: #8b95a5; font: 600 10px/1.2 inherit; font-family: inherit; letter-spacing: 0.09em; text-transform: uppercase; text-align: left; }
+.fold-head:hover { background: none; color: #e9edf3; }
+.fold-head em { font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 500; color: #c5ccd8; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%; }
+.caret { display: inline-block; transition: transform 0.15s; }
+.fold.open > .fold-head .caret { transform: rotate(90deg); }
+.fold:not(.open) > .fold-body { display: none; }
+.fold-body > div + div { margin-top: 12px; }
+.rw .fold { margin-bottom: 6px; }
 .foot { padding: 10px 12px 12px; border-top: 1px solid rgba(255, 255, 255, 0.1); display: grid; gap: 8px; }
 h4 { margin: 0 0 6px; font: 600 10px/1 inherit; font-family: inherit; letter-spacing: 0.09em; text-transform: uppercase; color: #8b95a5; display: flex; justify-content: space-between; align-items: center; }
 h4 span { text-transform: none; letter-spacing: 0; font-weight: 500; color: #c5ccd8; }
 button { appearance: none; font: inherit; color: inherit; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 7px; padding: 5px 9px; cursor: pointer; min-height: 28px; }
 button:hover { background: rgba(255, 255, 255, 0.16); }
 button:disabled { opacity: 0.35; cursor: default; }
+button[data-act="target"][aria-pressed="true"] { background: #ffb02e; color: #1b1200; border-color: transparent; font-weight: 700; }
 button[aria-pressed="true"] { background: #3ea0ff; color: #04121f; border-color: transparent; font-weight: 700; }
 button.primary { background: #3ea0ff; color: #04121f; border-color: transparent; font-weight: 700; }
 button.danger { color: #ff8f85; }
@@ -169,6 +179,17 @@ textarea::placeholder { color: #7d8796; }
 .tick input { accent-color: #ffb02e; margin: 0; }
 .sel-rw, .pass-out { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255, 176, 46, 0.25); }
 .sel-name { margin: 0 0 5px; }
+.bar.targeting .head .dot { background: #ffb02e; box-shadow: 0 0 0 3px rgba(255, 176, 46, 0.3); }
+.box.hover.t { outline-color: #ffb02e; }
+.tbox { position: fixed; pointer-events: none; z-index: 2147482900; outline: 2px dashed #ffb02e; outline-offset: 3px; border-radius: 3px; }
+.tbox span { position: absolute; left: -12px; top: -12px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: #ffb02e; color: #1b1200; font: 700 11px/20px -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }
+.targets { margin-top: 8px; }
+.tip { margin: 0 0 5px; }
+.tlist { display: grid; gap: 3px; }
+.tlist div { display: flex; gap: 6px; align-items: center; font-size: 11.5px; }
+.tlist b { flex: none; width: 18px; height: 18px; border-radius: 9px; background: #ffb02e; color: #1b1200; font-size: 10.5px; line-height: 18px; text-align: center; }
+.tlist span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c5ccd8; cursor: pointer; }
+.ph .n { display: inline-block; min-width: 18px; height: 18px; border-radius: 9px; background: #ffb02e; color: #1b1200; font-size: 10.5px; font-weight: 700; line-height: 18px; text-align: center; margin-right: 5px; }
 .ph { padding: 8px 0 9px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
 .ph:last-child { border-bottom: 0; }
 .ph .was { display: block; color: #c5ccd8; font-size: 11.5px; margin-bottom: 4px; cursor: pointer; text-decoration: underline dotted rgba(255, 255, 255, 0.3); text-underline-offset: 3px; }
@@ -179,6 +200,7 @@ textarea::placeholder { color: #7d8796; }
 const HTML = `
 <div class="box hover"></div>
 <div class="box pick"><span class="tag"></span></div>
+<div class="marks"></div>
 <div class="bar" role="region" aria-label="Page editor (review tool)">
   <div class="head"><i class="dot"></i><b>Edit page</b>
     <button data-act="mode" aria-pressed="false" title="Pick elements by clicking them (E)">Select</button>
@@ -187,17 +209,33 @@ const HTML = `
   <div class="body">
     <div class="rw">
       <h4>Rewrite with AI <span class="rw-n"></span></h4>
-      <textarea class="mood" rows="2" placeholder="Describe the mood: e.g. dry and specific, like I'm telling another designer" spellcheck="true"></textarea>
-      <div class="chips mood-chips"></div>
-      <div class="chips shape"></div>
-      <div class="row fill">
-        <button data-act="pass" class="primary" title="Rewrite the page's headings together, a few options each">✦ All headings</button>
-        <button data-act="rewrite" title="Rewrite the selected text (R)">✦ Selected</button>
+      <div class="fold" data-fold="mood">
+        <button class="fold-head" data-foldbtn="mood"><span class="caret">▸</span> Mood <em class="mood-sum"></em></button>
+        <div class="fold-body">
+          <textarea class="mood" rows="2" placeholder="Describe the mood: e.g. dry and specific, like I'm telling another designer" spellcheck="true"></textarea>
+          <div class="chips mood-chips"></div>
+          <div class="chips shape"></div>
+        </div>
       </div>
-      <label class="tick"><input type="checkbox" class="only-flagged" checked> Only headings that read as AI</label>
+      <div class="row fill">
+        <button data-act="target" title="Click text on the page to choose exactly what to rewrite (B)">◎ Pick blocks</button>
+        <button data-act="pass" title="Rewrite the page's headings together, a few options each">✦ All headings</button>
+      </div>
+      <div class="targets" hidden>
+        <p class="grp tip">Click text on the page to add it, click again to drop it.</p>
+        <div class="tlist"></div>
+        <div class="row fill" style="margin-top:6px">
+          <button data-act="target-go" class="primary">✦ Rewrite</button>
+          <button data-act="target-clear" class="ghost">Clear</button>
+        </div>
+      </div>
+      <label class="tick"><input type="checkbox" class="only-flagged" checked> All headings: only the ones that read as AI</label>
       <div class="sel-rw" hidden>
         <p class="grp sel-name"></p>
         <div class="flags now"></div>
+        <div class="row fill" style="margin-top:6px">
+          <button data-act="rewrite" title="Five options for the selected text (R)">✦ Write 5 options</button>
+        </div>
         <div class="diag sel-diag" hidden></div>
         <div class="opts"></div>
         <div class="row fill more" style="margin-top:6px" hidden>
@@ -209,13 +247,14 @@ const HTML = `
         <div class="diag pass-diag"></div>
         <div class="pass-list"></div>
         <div class="row fill" style="margin-top:6px">
-          <button data-act="pass" title="Ask again for fresh options">Again</button>
+          <button data-act="again" title="Ask again for fresh options">Again</button>
           <button data-act="pass-clear" class="ghost">Clear</button>
         </div>
       </div>
     </div>
-    <div>
-      <h4>Selected</h4>
+    <div class="fold" data-fold="selected">
+      <button class="fold-head" data-foldbtn="selected"><span class="caret">▸</span> Selected <em class="sel-sum"></em></button>
+      <div class="fold-body">
       <div class="none">Turn on <b>Select</b> (or press E), then click anything on the page.</div>
       <div class="sel" hidden>
         <div class="who"></div>
@@ -230,8 +269,11 @@ const HTML = `
         </div>
         <div class="editing-tip" hidden>Typing into the page. <kbd>Enter</kbd> keeps it, <kbd>⇧Enter</kbd> new line, <kbd>Esc</kbd> cancels.</div>
       </div>
+      </div>
     </div>
-    <div class="tools" hidden>
+    <div class="tools fold" data-fold="style" hidden>
+      <button class="fold-head" data-foldbtn="style"><span class="caret">▸</span> Style <em>size, type, colour, scale</em></button>
+      <div class="fold-body">
       <div>
         <h4>Text size <span class="fs"></span></h4>
         <div class="row">
@@ -263,12 +305,16 @@ const HTML = `
           <button data-act="scale-reset" class="ghost">Reset</button>
         </div>
       </div>
+      </div>
     </div>
     <div>
       <h4>Changes <span class="count">0</span></h4>
       <div class="list"></div>
     </div>
-    <div class="keys"><kbd>E</kbd> select on/off · <kbd>G</kbd> column grid · <kbd>↑</kbd><kbd>↓</kbd> parent/inside · <kbd>T</kbd> edit text · <kbd>R</kbd> rewrite · <kbd>Delete</kbd> remove · <kbd>⌘Z</kbd> undo · <kbd>Esc</kbd> deselect</div>
+    <div class="fold" data-fold="keys">
+      <button class="fold-head" data-foldbtn="keys"><span class="caret">▸</span> Shortcuts</button>
+      <div class="fold-body keys"><kbd>E</kbd> select on/off · <kbd>G</kbd> column grid · <kbd>↑</kbd><kbd>↓</kbd> parent/inside · <kbd>T</kbd> edit text · <kbd>B</kbd> pick blocks · <kbd>R</kbd> rewrite · <kbd>Delete</kbd> remove · <kbd>⌘Z</kbd> undo · <kbd>Esc</kbd> deselect</div>
+    </div>
   </div>
   <div class="foot">
     <div class="row fill">
@@ -338,10 +384,23 @@ export function mountEditor(options: EditorOptions | string): void {
   let rwBusy = 0;
   let rwDiag = "";
   let rwVia = "";
-  type PassItem = { id: string; selector: string; text: string; options: { text: string; why: string }[]; used?: string };
+  type PassItem = { id: string; n?: number; selector: string; text: string; options: { text: string; why: string }[]; used?: string };
   let passItems: PassItem[] = [];
+  /** Pick blocks: the text blocks chosen on the page, in the order picked. */
+  let targeting = false;
+  let targets: Element[] = [];
+  let lastRun: "headings" | "blocks" = "headings";
+  let numbered = false;
   let passDiag = "";
   const moodKey = `${prefix}:mood`;
+  // Which sections are open (Style, Mood and Shortcuts start folded); remembered per browser.
+  const foldKey = `${prefix}:open`;
+  let open: string[] = [];
+  try {
+    open = JSON.parse(localStorage.getItem(foldKey) ?? '["selected"]');
+  } catch {
+    open = [];
+  }
   let mood: { words: string; picks: string[] } = { words: "", picks: ["Specific", "Like I'm talking"] };
   try {
     mood = { ...mood, ...JSON.parse(localStorage.getItem(moodKey) ?? "{}") };
@@ -602,20 +661,53 @@ export function mountEditor(options: EditorOptions | string): void {
     render();
   };
 
-  /** Every heading on the page (or only the ones that read as AI), rewritten together. */
-  const headingsPass = async () => {
-    if (rwBusy) return;
+  /** The block of text a click lands in: the paragraph, heading, list item or quote around it. */
+  const BLOCKS = "p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption, dt, dd, td, th, caption, summary";
+  const blockOf = (el: Element | null): Element | null => {
+    if (!el || ours(el)) return null;
+    const block = el.closest(BLOCKS) ?? el.closest("a, button, label") ?? el;
+    return block instanceof HTMLElement && plainOf(block) && block !== document.body ? block : null;
+  };
+  const toggleTarget = (el: Element | null) => {
+    if (!el) return say("No words there. Click on some text.", true);
+    const at = targets.indexOf(el);
+    if (at >= 0) targets.splice(at, 1);
+    else {
+      // Picking a block inside one already picked (or around one) replaces it.
+      targets = targets.filter((t) => !t.contains(el) && !el.contains(t));
+      targets.push(el);
+    }
+    render();
+  };
+  const setTargeting = (on: boolean) => {
+    targeting = on;
+    if (on) selecting = false;
+    hovered = null;
+    place(hoverBox, null);
+    render();
+  };
+  const marks = $(".marks");
+  const drawMarks = () => {
+    targets = targets.filter((t) => t.isConnected);
+    marks.innerHTML = targets
+      .map((t, i) => {
+        const r = t.getBoundingClientRect();
+        return `<div class="tbox" style="left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px"><span>${i + 1}</span></div>`;
+      })
+      .join("");
+  };
+
+  /** Rewrite a set of text blocks together: three options each, or five for a single block. */
+  const runSet = async (els: Element[], kind: "headings" | "blocks") => {
+    if (rwBusy || !els.length) return;
     if (editing) stopTyping(true);
-    const onlyFlagged = ($(".only-flagged") as HTMLInputElement).checked;
-    const all = [...document.querySelectorAll<HTMLElement>("main h1, main h2, main h3, main blockquote")].filter((el) => !ours(el) && plainOf(el));
-    const chosen = all.filter((el) => !onlyFlagged || slopIn(plainOf(el), true, names).length).slice(0, 24);
-    if (!chosen.length) return say("No headings read as AI. Untick “Only headings that read as AI” to rewrite them all anyway.");
-    const items = chosen.map((el, i) => ({ el, id: `h${i + 1}` }));
+    lastRun = kind;
+    const items = els.map((el, i) => ({ el: el as HTMLElement, id: `b${i + 1}` }));
     const body = {
       page,
-      mode: "headings",
-      count: 3,
-      headings: all.map((el) => plainOf(el)),
+      mode: "set",
+      count: items.length === 1 ? 5 : 3,
+      headings: [...document.querySelectorAll<HTMLElement>("main h1, main h2, main h3, h1, h2")].filter((h, i, all) => all.indexOf(h) === i && !ours(h)).map((h) => plainOf(h)).filter(Boolean),
       mood: mood.words,
       chips: mood.picks,
       items: items.map(({ el, id }) => ({
@@ -623,23 +715,27 @@ export function mountEditor(options: EditorOptions | string): void {
         role: roleOf(el),
         text: plainOf(el),
         original: editFor(el, false)?.wasText ?? plainOf(el),
-        nearby: (el.closest("section") as HTMLElement | null)?.innerText.replace(/\s+/g, " ").slice(0, 700) ?? "",
+        nearby: ((el.closest("section, article, main") as HTMLElement | null) ?? el.parentElement)?.innerText.replace(/\s+/g, " ").slice(0, 700) ?? "",
       })),
     };
-    startBusy(`options for ${items.length} heading${items.length === 1 ? "" : "s"}`);
+    const what = kind === "headings" ? "heading" : "block";
+    startBusy(`options for ${items.length} ${what}${items.length === 1 ? "" : "s"}`);
     try {
       const res = await fetch(`${endpoint}/rewrite`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const data = (await res.json()) as { headings?: { id: string; options: { text: string; why: string }[] }[]; diagnosis?: string; via?: string; error?: string };
       if (!res.ok || !data.headings) throw new Error(data.error ?? `The dev server said ${res.status}.`);
-      passItems = items.map(({ el, id }) => ({
+      numbered = kind === "blocks";
+      passItems = items.map(({ el, id }, i) => ({
         id,
+        n: i + 1,
         selector: selectorOf(el),
         text: plainOf(el),
         options: (data.headings!.find((h) => h.id === id)?.options ?? []).filter((o) => o && typeof o.text === "string" && o.text.trim()).map((o) => ({ text: o.text.trim(), why: String(o.why ?? "").trim() })),
       }));
       passDiag = data.diagnosis ?? "";
       rwVia = data.via ?? "";
-      say(`Options for ${passItems.length} headings. Click one under each heading to use it, then Save.`);
+      if (kind === "blocks") setTargeting(false);
+      say(`Options for ${passItems.length} ${what}${passItems.length === 1 ? "" : "s"}. Click one to use it, then Save.`);
     } catch (e) {
       say(String((e as Error).message || e), true);
     } finally {
@@ -647,12 +743,21 @@ export function mountEditor(options: EditorOptions | string): void {
     }
   };
 
+  /** Every heading on the page (or only the ones that read as AI), rewritten together. */
+  const headingsPass = () => {
+    const onlyFlagged = ($(".only-flagged") as HTMLInputElement).checked;
+    const all = [...document.querySelectorAll<HTMLElement>("main h1, main h2, main h3, main blockquote")].filter((el) => !ours(el) && plainOf(el));
+    const chosen = all.filter((el) => !onlyFlagged || slopIn(plainOf(el), true, names).length).slice(0, 24);
+    if (!chosen.length) return say("No headings read as AI. Untick “only the ones that read as AI” to rewrite them all anyway.");
+    void runSet(chosen, "headings");
+  };
+
   const usePassOption = (key: string) => {
     const [i, j] = key.split(":").map(Number);
     const item = passItems[i];
     const option = item?.options[j];
     const el = item ? find(item.selector) : null;
-    if (!item || !option || !el) return say("That heading has moved. Run All headings again.", true);
+    if (!item || !option || !el) return say("That text has moved on the page. Ask again.", true);
     const before = el.innerHTML;
     el.textContent = option.text;
     if (el.innerHTML !== before) recordText(el, before);
@@ -780,6 +885,21 @@ export function mountEditor(options: EditorOptions | string): void {
     $("[data-act=rewrite]").toggleAttribute("disabled", !words || !!rwBusy);
     root.querySelectorAll<HTMLElement>("[data-act=pass]").forEach((b) => b.toggleAttribute("disabled", !!rwBusy));
     root.querySelectorAll<HTMLElement>("[data-chip]").forEach((b) => b.setAttribute("aria-pressed", String(mood.picks.includes(b.dataset.chip!))));
+    root.querySelectorAll<HTMLElement>("[data-fold]").forEach((f) => f.classList.toggle("open", open.includes(f.dataset.fold!)));
+    $(".sel-sum").textContent = picked ? nameOf(picked) : "nothing";
+    $(".mood-sum").textContent = [mood.words.trim() && `“${mood.words.trim().slice(0, 24)}${mood.words.trim().length > 24 ? "…" : ""}”`, ...mood.picks].filter(Boolean).join(", ") || "none";
+    bar.classList.toggle("targeting", targeting);
+    $("[data-act=target]").setAttribute("aria-pressed", String(targeting));
+    $("[data-act=target]").textContent = targeting ? "◎ Picking… (done)" : "◎ Pick blocks";
+    targets = targets.filter((t) => t.isConnected);
+    $(".targets").hidden = !targeting && !targets.length;
+    $(".tlist").innerHTML = targets
+      .map((t, i) => `<div><b>${i + 1}</b><span data-tgo="${i}" title="Show it on the page">${plainOf(t as HTMLElement).slice(0, 60).replace(/</g, "&lt;")}</span><button class="ghost" data-tdrop="${i}" title="Drop it">✕</button></div>`)
+      .join("");
+    const go = $("[data-act=target-go]");
+    go.toggleAttribute("disabled", !targets.length || !!rwBusy);
+    go.textContent = targets.length > 1 ? `✦ Rewrite these ${targets.length}` : "✦ Rewrite this block";
+    drawMarks();
     $(".pass-out").hidden = !passItems.length;
     $(".pass-diag").innerHTML = passDiag ? `${passDiag.replace(/</g, "&lt;")} <span class="via">${rwVia ? `· ${rwVia}` : ""}</span>` : "";
     $(".pass-list").innerHTML = passItems
@@ -791,7 +911,7 @@ export function mountEditor(options: EditorOptions | string): void {
           })
           .join("");
         const flags = slopIn(item.text, true, names);
-        return `<div class="ph"><span class="was" data-goto="${i}" title="Show it on the page">${item.used ? `<s>${item.text.replace(/</g, "&lt;")}</s>` : item.text.replace(/</g, "&lt;")}</span>${flags.length ? `<div class="flags">${flagsHtml(flags)}</div>` : ""}<div class="opts">${opts || '<p class="grp">No options came back for this one.</p>'}</div></div>`;
+        return `<div class="ph">${numbered && item.n ? `<span class="n">${item.n}</span>` : ""}<span class="was" data-goto="${i}" title="Show it on the page">${item.used ? `<s>${item.text.replace(/</g, "&lt;")}</s>` : item.text.replace(/</g, "&lt;")}</span>${flags.length ? `<div class="flags">${flagsHtml(flags)}</div>` : ""}<div class="opts">${opts || '<p class="grp">No options came back for this one.</p>'}</div></div>`;
       })
       .join("");
     $(".rw-n").textContent = rwBusy ? "writing…" : "";
@@ -919,12 +1039,21 @@ export function mountEditor(options: EditorOptions | string): void {
     if (editing && (event.target as HTMLElement).closest("button, [data-go]")) event.preventDefault();
   });
   bar.addEventListener("click", (event) => {
-    const el = (event.target as HTMLElement).closest<HTMLElement>("button, [data-go], [data-goto]");
+    const el = (event.target as HTMLElement).closest<HTMLElement>("button, [data-go], [data-goto], [data-tgo]");
     if (!el) return;
     const act = el.dataset.act;
     const wasTyping = !!editing;
     if (editing) stopTyping(true);
-    if (el.dataset.chip) {
+    if (el.dataset.foldbtn) {
+      const key = el.dataset.foldbtn;
+      open = open.includes(key) ? open.filter((k) => k !== key) : [...open, key];
+      try {
+        localStorage.setItem(foldKey, JSON.stringify(open));
+      } catch {
+        /* private mode */
+      }
+      render();
+    } else if (el.dataset.chip) {
       const chip = el.dataset.chip;
       mood.picks = mood.picks.includes(chip) ? mood.picks.filter((c) => c !== chip) : [...mood.picks, chip];
       saveMood();
@@ -937,7 +1066,23 @@ export function mountEditor(options: EditorOptions | string): void {
         found.scrollIntoView({ block: "center", behavior: "smooth" });
         pick(found);
       }
-    } else if (act === "pass") void headingsPass();
+    } else if (act === "pass") headingsPass();
+    else if (act === "again") {
+      if (lastRun === "blocks") {
+        const els = passItems.map((it) => find(it.selector)).filter((x): x is Element => !!x);
+        void runSet(els, "blocks");
+      } else headingsPass();
+    } else if (act === "target") setTargeting(!targeting);
+    else if (act === "target-go") void runSet(targets, "blocks");
+    else if (act === "target-clear") {
+      targets = [];
+      render();
+    } else if (el.dataset.tdrop) {
+      targets.splice(Number(el.dataset.tdrop), 1);
+      render();
+    } else if (el.dataset.tgo) {
+      targets[Number(el.dataset.tgo)]?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
     else if (act === "pass-clear") {
       passItems = [];
       passDiag = "";
@@ -967,6 +1112,7 @@ export function mountEditor(options: EditorOptions | string): void {
       } else say("That one is removed. Use ✕ to bring it back.");
     } else if (act === "mode") {
       selecting = !selecting;
+      if (selecting) targeting = false;
       hovered = null;
       place(hoverBox, null);
       render();
@@ -1046,7 +1192,7 @@ export function mountEditor(options: EditorOptions | string): void {
   // ---- picking on the page (capture phase, so the page's own handlers never see it)
 
   const swallow = (event: Event) => {
-    if (!selecting || ours(event.target)) return false;
+    if (!(selecting || targeting) || ours(event.target)) return false;
     if (editing && event.target instanceof Node && editing.contains(event.target)) return false;
     event.preventDefault();
     event.stopPropagation();
@@ -1061,7 +1207,8 @@ export function mountEditor(options: EditorOptions | string): void {
     (event) => {
       if (!swallow(event)) return;
       if (editing) stopTyping(true);
-      pick(event.target as Element);
+      if (targeting) toggleTarget(blockOf(event.target as Element));
+      else pick(event.target as Element);
     },
     true,
   );
@@ -1069,7 +1216,7 @@ export function mountEditor(options: EditorOptions | string): void {
   document.addEventListener(
     "dblclick",
     (event) => {
-      if (!swallow(event)) return;
+      if (!swallow(event) || targeting) return;
       pick(event.target as Element);
       startTyping({ x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY });
     },
@@ -1095,15 +1242,16 @@ export function mountEditor(options: EditorOptions | string): void {
   document.addEventListener(
     "mousemove",
     (event) => {
-      if (!selecting || ours(event.target)) {
+      if (!(selecting || targeting) || ours(event.target)) {
         if (hovered) {
           hovered = null;
           place(hoverBox, null);
         }
         return;
       }
-      hovered = event.target as Element;
-      place(hoverBox, hovered === picked ? null : hovered);
+      hovered = targeting ? blockOf(event.target as Element) : (event.target as Element);
+      hoverBox.classList.toggle("t", targeting);
+      place(hoverBox, hovered === picked || (hovered && targets.includes(hovered)) ? null : hovered);
     },
     true,
   );
@@ -1132,8 +1280,11 @@ export function mountEditor(options: EditorOptions | string): void {
       if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "z") undo();
       else if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "s") void send();
       else if (event.metaKey || event.ctrlKey || event.altKey) used = false;
+      else if (key.toLowerCase() === "b") setTargeting(!targeting);
+      else if (key === "Escape" && targeting) setTargeting(false);
       else if (key.toLowerCase() === "e") {
         selecting = !selecting;
+        if (selecting) targeting = false;
         place(hoverBox, null);
         render();
       } else if (key.toLowerCase() === "g") document.documentElement.classList.toggle("show-grid");
@@ -1154,6 +1305,7 @@ export function mountEditor(options: EditorOptions | string): void {
   );
   const follow = () => {
     place(pickBox, picked);
+    if (targets.length) drawMarks();
     if (hovered) place(hoverBox, hovered === picked ? null : hovered);
   };
   window.addEventListener("scroll", follow, { passive: true, capture: true });
