@@ -1,0 +1,4 @@
+node_modules/
+page-edits/
+.DS_Store
+.claude/

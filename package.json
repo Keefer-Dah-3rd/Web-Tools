@@ -1,0 +1,22 @@
+{
+  "name": "web-tools",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tools for editing web pages live in the browser while you build them.",
+  "type": "module",
+  "exports": {
+    "./page-editor": "./page-editor/editor.ts",
+    "./page-editor/slop": "./page-editor/slop.ts",
+    "./page-editor/presets/keefedesign": "./page-editor/presets/keefedesign.ts",
+    "./page-editor/vite-plugin.mjs": "./page-editor/vite-plugin.mjs"
+  },
+  "scripts": {
+    "demo": "vite demo --port 5190",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "vite": "6.4.5"
+  }
+}
