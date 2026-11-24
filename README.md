@@ -188,3 +188,27 @@ in the Mibbit repo) pulls the toolbar from the helper and keeps it on in that br
 to `live-editor/edits/mibbit/<page>.json`. Mibbit is React 19, which no longer records JSX lines,
 so each saved edit names its file when React kept it (compiled line, marked `~`) and always the
 components it sits in, e.g. `in TrackTab < CanvasRow2 < SongCanvas`.
+
+#### Colour Lab (Mibbit)
+
+The **◐ Colour Lab** pill (bottom left) opens a palette lab on the running app. Pick a seed colour
+(or a quick pick, or the Hue / Chroma / Lightness sliders) and the brand's whole 13-step scale is
+re-derived from it in OKLCH: the seed lands exactly on step 800 and the other steps keep the
+current scale's shape. The casing (neutral) scale can turn with the brand's hue and its tint can go
+from pure grey to three times as colourful; the two supporting scales follow a harmony. The app
+recolours live, because the lab overrides the scale variables on `:root`.
+
+- **Contrast** checks every role pairing from Mibbit's `scripts/palette-contrast.py` live; click it
+  for the list, failures first.
+- **Original** (click, or hold O) flips back to the app's own colours to compare.
+- **Ask Claude** turns a mood into three palettes; click one to try it.
+- **Keep** names the current palette for later; **Save palette** writes
+  `live-editor/edits/mibbit/palette-<name>.json` (every changed step, the old values, the contrast
+  result, and the places that paint the brand with fixed colours) for Claude to apply to
+  `web/src/styles/tokens.css`.
+- The mascot orb paints with fixed colours, so the lab previews it with a hue filter; the save
+  lists it (and the other fixed crimsons) as needing a code change.
+
+Code: `live-editor/colour/palette.ts` (the maths, tested in `test/palette.test.ts`),
+`live-editor/colour/lab.ts` (the panel), `live-editor/sites/mibbit-palette.ts` (Mibbit's scales and
+pairings) and `sites/mibbit-palette-brief.md` (what Claude is told).

@@ -12,6 +12,8 @@
  */
 import { mountEditor } from "../editor";
 import { MIBBIT_NAMES, MIBBIT_SWATCHES, MIBBIT_TYPES } from "../../page-editor/presets/mibbit";
+import { mountColourLab } from "../colour/lab";
+import { MIBBIT_PALETTE } from "./mibbit-palette";
 
 const route = (location.hash.replace(/^#\/?/, "") || location.pathname.replace(/^\/+/, ""))
   .split(/[/?]/)[0]
@@ -24,5 +26,12 @@ mountEditor({
   types: MIBBIT_TYPES,
   swatches: MIBBIT_SWATCHES,
   names: MIBBIT_NAMES,
+  storagePrefix: "mibbit-tools",
+});
+
+// The Colour Lab: regenerate the brand and casing scales live (bottom-left pill).
+mountColourLab({
+  site: MIBBIT_PALETTE,
+  endpoint: window.__pageEditorLive?.endpoint ?? "http://127.0.0.1:5198/__page-editor",
   storagePrefix: "mibbit-tools",
 });

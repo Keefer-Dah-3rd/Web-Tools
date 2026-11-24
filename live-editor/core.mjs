@@ -251,6 +251,7 @@ export function configFor(options, base) {
   return {
     editsDir: at(options.editsDir ?? "page-edits"),
     brief: options.brief ? at(options.brief) : DEFAULT_BRIEF,
+    paletteBrief: options.paletteBrief ? at(options.paletteBrief) : null,
     facts: (options.facts ?? []).map(at),
     model: options.model ?? process.env.PAGE_EDITOR_MODEL ?? "claude-opus-5-5",
     effort: options.effort ?? "medium",
@@ -330,5 +331,109 @@ export function handleEdits(cfg, req, res) {
     } catch {
       reply(400, { error: "not JSON" });
     }
+  });
+}
+
+// ---- Colour Lab (colour/lab.ts): palettes from a mood, and saving a chosen palette.
+
+const PALETTE_SCHEMA = {
+  type: "object",
+  properties: {
+    palettes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          seed: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" },
+          harmony: { type: "string", enum: ["keep", "complementary", "split", "analogous", "triad", "mono"] },
+          casingFollow: { type: "boolean" },
+          casingTint: { type: "number" },
+          why: { type: "string" },
+        },
+        required: ["name", "seed", "harmony", "casingFollow", "casingTint", "why"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["palettes"],
+  additionalProperties: false,
+};
+
+function palettePrompt(req) {
+  const hexes = (v) => (Array.isArray(v) ? v.slice(0, 13).map((h) => clip(h, 9)).join(" ") : "(none)");
+  return [
+    "## Mood",
+    `In their words: "${clip(req.mood, 400)}"`,
+    "",
+    "## The app now",
+    `Brand scale as designed, 50 → 999 (step 800 = ${clip(req.original?.seed, 9)}): ${hexes(req.original?.brand)}`,
+    `Casing scale as designed, 50 → 999: ${hexes(req.original?.casing)}`,
+    "",
+    "## In the lab right now",
+    `Seed ${clip(req.current?.seed, 9)}, harmony ${clip(req.current?.harmony, 20)}, casing tint ${Number(req.current?.casingTint ?? 1)}`,
+    `Brand scale it gives: ${hexes(req.current?.brand)}`,
+    list(req.kept, 24, 9).length ? `Already kept (don't repeat): ${list(req.kept, 24, 9).join(", ")}` : "",
+    "",
+    "Suggest 3 palettes.",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+async function palette(cfg, req) {
+  if (!cfg.paletteBrief) return { error: "This site has no palette brief (paletteBrief in its config)." };
+  const system = briefFrom(cfg.paletteBrief);
+  const prompt = palettePrompt(req);
+  const cli = await askCli(cfg, system, prompt, PALETTE_SCHEMA);
+  if (cli.ok) return { ...cli.answer, via: "Claude Code" };
+  if (!cfg.sessionFallback) return { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error };
+  const session = await askSession(cfg, system, prompt, PALETTE_SCHEMA);
+  if (session.ok) return { ...session.answer, via: "Claude session" };
+  return { error: `${cli.error} No Claude session answered either.` };
+}
+
+/** Read a JSON body (up to `max` bytes), then hand it to `then`. */
+function jsonBody(req, res, max, then) {
+  const reply = replyWith(res);
+  if (req.method !== "POST") return reply(405, { error: "POST only" });
+  let raw = "";
+  req.on("data", (chunk) => {
+    raw += chunk;
+    if (raw.length > max) req.destroy();
+  });
+  req.on("end", async () => {
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return reply(400, { error: "not JSON" });
+    }
+    try {
+      await then(data, reply);
+    } catch (e) {
+      reply(500, { error: String(e?.message ?? e) });
+    }
+  });
+}
+
+/** POST <endpoint>/palette: a mood in, three palettes (seed, harmony, casing) out. */
+export function handlePalette(cfg, req, res) {
+  jsonBody(req, res, 100_000, async (data, reply) => {
+    if (!clip(data.mood, 400)) return reply(400, { error: "Describe a mood first." });
+    const answer = await palette(cfg, data);
+    reply(answer.error ? 502 : 200, answer);
+  });
+}
+
+/** POST <endpoint>/palette-save: the chosen palette, written to <editsDir>/palette-<name>.json for Claude. */
+export function handlePaletteSave(cfg, req, res) {
+  jsonBody(req, res, 500_000, (data, reply) => {
+    if (!data || typeof data.scales !== "object" || !Object.keys(data.scales).length) return reply(400, { error: "No changed scales to save." });
+    const slug = clip(data.name, 60).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "palette";
+    mkdirSync(cfg.editsDir, { recursive: true });
+    const file = join(cfg.editsDir, `palette-${slug}.json`);
+    writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+    reply(200, { file });
   });
 }
