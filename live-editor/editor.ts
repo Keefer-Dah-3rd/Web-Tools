@@ -1139,17 +1139,21 @@ export function mountEditor(options: EditorOptions | string): void {
     peekSheet.textContent = "";
     change((e) => (target === "color" ? (e.color = hex) : (e.fill = hex)));
   };
-  // Hover a swatch: the picked element wears it until the pointer moves off the swatches; a click keeps it.
+  // Hover a colour swatch or a type style: the picked element wears it until the pointer moves off
+  // them; a click keeps it.
   let peekOff = 0;
   root.addEventListener("pointerover", (event) => {
-    const swatch = (event.target as HTMLElement).closest<HTMLElement>("[data-colour]");
+    const hovered = event.target as HTMLElement;
+    const swatch = hovered.closest<HTMLElement>("[data-colour]");
+    const typeKey = hovered.closest<HTMLElement>("[data-type]")?.dataset.type;
     window.clearTimeout(peekOff);
-    if (!swatch) {
+    if (!swatch && !(typeKey && TYPE[typeKey])) {
       if (peekSheet.textContent) peekOff = window.setTimeout(() => (peekSheet.textContent = ""), 80);
       return;
     }
     if (!picked || editing) return;
-    peekSheet.textContent = `${selectorOf(picked)} { ${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important; }`;
+    const look = swatch ? `${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important;` : TYPE[typeKey!].css.replace(/;/g, " !important;");
+    peekSheet.textContent = `${selectorOf(picked)} { ${look} }`;
   });
   bar.addEventListener("pointerleave", () => {
     window.clearTimeout(peekOff);
@@ -1287,7 +1291,10 @@ export function mountEditor(options: EditorOptions | string): void {
       rwAsked = [];
       rwDiag = "";
       render();
-    } else if (el.dataset.type) change((e) => (e.type = e.type === el.dataset.type ? undefined : el.dataset.type));
+    } else if (el.dataset.type) {
+      peekSheet.textContent = "";
+      change((e) => (e.type = e.type === el.dataset.type ? undefined : el.dataset.type));
+    }
     else if (el.dataset.colour) setColour(el.dataset.colour);
     else if (el.dataset.target) {
       target = el.dataset.target as typeof target;
