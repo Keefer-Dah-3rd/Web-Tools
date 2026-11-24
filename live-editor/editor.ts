@@ -490,6 +490,8 @@ export function mountEditor(options: EditorOptions | string): void {
       parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${index})`);
       node = parent;
     }
+    // Anchor a path that reached the top to body, or it would match the same shape anywhere below.
+    if (node === document.body) parts.unshift("body");
     return parts.join(" > ");
   };
   const CSS_ESCAPE = (s: string) => (typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(s) : s);
@@ -1110,7 +1112,12 @@ export function mountEditor(options: EditorOptions | string): void {
       if (!sent) return window.clearInterval(poll);
       try {
         const res = await fetch(`${endpoint}/edits?page=${encodeURIComponent(page)}`);
-        const { applied } = (await res.json()) as { applied: string | null };
+        const { applied, error } = (await res.json()) as { applied: string | null; error?: { savedAt: string; message: string } | null };
+        if (error?.savedAt === sent.at) {
+          window.clearInterval(poll);
+          localStorage.removeItem(sentKey);
+          return say(`Couldn't write it into the code: ${error.message}`, true);
+        }
         if (applied !== sent.at) return;
         window.clearInterval(poll);
         localStorage.removeItem(sentKey);
@@ -1138,7 +1145,7 @@ export function mountEditor(options: EditorOptions | string): void {
       localStorage.setItem(sentKey, JSON.stringify({ at: data.savedAt, edits: JSON.stringify(edits) }));
       say(
         live
-          ? `Saved ${edits.length} change${edits.length === 1 ? "" : "s"} and sent to Claude. The page reloads once they're published (a few minutes).`
+          ? `Saved ${edits.length} change${edits.length === 1 ? "" : "s"} and sent to Claude. The page reloads once they're in (a minute or a few).`
           : `Saved ${edits.length} change${edits.length === 1 ? "" : "s"} and sent to Claude. The page reloads when they are in the code.`,
       );
       waitForClaude();

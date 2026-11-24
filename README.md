@@ -202,10 +202,10 @@ recolours live, because the lab overrides the scale variables on `:root`.
   for the list, failures first.
 - **Original** (click, or hold O) flips back to the app's own colours to compare.
 - **Ask Claude** turns a mood into three palettes; click one to try it.
-- **Keep** names the current palette for later; **Save palette** writes
+- **Keep** names the current palette for later; **Put it in the app** writes it into
+  `web/src/styles/tokens.css` (see Putting saves into the code below), keeping a record in
   `live-editor/edits/mibbit/palette-<name>.json` (every changed step, the old values, the contrast
-  result, and the places that paint the brand with fixed colours) for Claude to apply to
-  `web/src/styles/tokens.css`.
+  result, and the places that paint the brand with fixed colours).
 - The mascot orb paints with fixed colours, so the lab previews it with a hue filter; the save
   lists it (and the other fixed crimsons) as needing a code change.
 
@@ -225,10 +225,35 @@ variations (about 30–60 seconds). The first goes on the app at once; click a c
 **Original** (or hold O) to compare, **More** for three in other directions. The app keeps working:
 markup, words and behaviour are untouched.
 
-**Keep** remembers a variation (with its part) for later; **Save design** writes
-`live-editor/edits/mibbit/design-<name>.json` (the part, its component chain, the request and the
-CSS) for Claude to write into the component's stylesheet. Parts drawn on a canvas say so: CSS can
+**Keep** remembers a variation (with its part) for later; **Put it in the app** has Claude write it
+into the component's stylesheet (see Putting saves into the code below), keeping a record in
+`live-editor/edits/mibbit/design-<name>.json` (the part, its component chain, the request and the CSS). Parts drawn on a canvas say so: CSS can
 change their frame, not what's drawn.
 
 Code: `live-editor/design/generator.ts`, `sites/mibbit-design.ts` (quick picks, which tokens) and
 `sites/mibbit-design-brief.md` plus the design facts in `mibbit.json` (what Claude is told).
+
+#### Putting saves into the code (Mibbit)
+
+With `"apply"` in a site's config, saves don't wait for someone to pick them up: the helper writes
+them into the project on its branch (`color-edits` for Mibbit), one commit per save.
+
+| Save | How it gets into the code |
+|---|---|
+| Colour Lab, **Put it in the app** | No AI: the changed steps are written into `web/src/styles/tokens.css`, `scripts/palette-contrast.py` re-runs (a failing pairing refuses the palette and puts the file back) and its table in `docs/research/` is regenerated. |
+| Design Generator, **Put it in the app** | Claude Code writes the variation into the component's stylesheet, replacing what it overrides (CSS files under `web/src/styles/` only). |
+| Toolbar, **Save** | Claude Code writes the text and style edits into the code (`web/src/` only); the toolbar reloads when they're in. |
+
+Claude Code runs headless in restricted mode: Read, Edit, Grep and Glob only, confined to the
+project, no shell, no settings, no MCP servers, your own sign-in (never an API key). The helper
+then checks only allowed files changed, type-checks when code (not just CSS) changed, and commits;
+anything else is put back with the reason shown in the panel. It refuses to start unless the
+project is on its branch with no uncommitted changes, and runs one apply at a time.
+
+**Undo** (in each panel, after an apply) reverts that commit; it only reverts commits the helper
+made (`live-editor/edits/<site>/applied-log.json`). The app's dev server may reload the page the
+moment the code changes; the panels note an apply before starting and pick up its result after
+the reload.
+
+Code: `live-editor/apply.mjs` (the applies, guards and Undo), `live-editor/applied.ts` (the
+panels' Apply / Undo).

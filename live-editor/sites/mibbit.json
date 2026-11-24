@@ -12,5 +12,21 @@
   "designBrief": "mibbit-design-brief.md",
   "designFacts": [
     "../../../../mibbit/mibbit_code/mibbit/.cursor/skills/op1-design-language/SKILL.md"
-  ]
+  ],
+  "apply": {
+    "repo": "../../../../mibbit/mibbit_code/mibbit",
+    "branch": "color-edits",
+    "tokens": "web/src/styles/tokens.css",
+    "contrastScript": "scripts/palette-contrast.py",
+    "contrastDoc": "docs/research/palette-contrast-2026-10.md",
+    "typecheck": [
+      "npx",
+      "tsc",
+      "--noEmit",
+      "-p",
+      "."
+    ],
+    "typecheckIn": "web",
+    "autoPage": true
+  }
 }

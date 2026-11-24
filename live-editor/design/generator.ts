@@ -9,6 +9,8 @@
  * says so when you pick one.
  */
 
+import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
+
 export interface DesignSite {
   /** Quick picks for what to change. */
   asks: string[];
@@ -91,12 +93,14 @@ textarea, input[type=text] { font: 500 12px/1.35 inherit; font-family: inherit; 
 .card details summary { cursor: pointer; color: #8e9aab; font-size: 10.5px; }
 .card pre { margin: 4px 0 0; max-height: 160px; overflow: auto; font: 500 10.5px/1.35 ui-monospace, Menlo, monospace; color: #cfd8e3; background: rgba(0,0,0,.3); padding: 6px; border-radius: 6px; white-space: pre-wrap; }
 .note { color: #8e9aab; font-size: 11px; margin: 0; }
+.head, .status, .foot, .applied { flex: none; }
 .status { min-height: 16px; color: #d9c7ff; font-size: 11px; padding: 0 12px 8px; }
 .status.err { color: #ff9a8a; }
 .foot { display: flex; gap: 6px; padding: 10px 12px 8px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .foot .primary { flex: 1; }
 .box { position: fixed; pointer-events: none; z-index: 2147483400; border-radius: 4px; display: none; outline: 2px dashed #b48cff; outline-offset: 2px; background: rgba(180,140,255,.08); }
 .box.picked { outline-style: solid; background: none; }
+${APPLIED_STYLE}
 .box .tag { position: absolute; left: -2px; top: -22px; background: #b48cff; color: #12071f; font: 600 11px/18px ui-monospace, "SF Mono", Menlo, monospace; padding: 0 6px; border-radius: 4px; white-space: nowrap; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; }
 `;
 
@@ -136,10 +140,11 @@ const HTML = `
     </section>
   </div>
   <div class="status" data-out="status"></div>
+  <div data-out="applied"></div>
   <div class="foot">
     <button data-act="clear" title="Take the variation off">As designed</button>
     <button data-act="keep" title="Keep the variation on the page for later">Keep</button>
-    <button class="primary" data-act="save" title="Hand it to Claude to write into the component's styles">Save design</button>
+    <button class="primary" data-act="save" title="Claude writes it into the component's styles (on the project's branch)">Put it in the app</button>
   </div>
 </div>`;
 
@@ -220,6 +225,7 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
   let hovered: Element | null = null;
   let original = false;
   let busy = false;
+  const writer = new CodeWriter(endpoint, storagePrefix, "design");
   askBox.value = last.ask ?? "";
 
   const remember = () => store(lastKey, { target, ask: askBox.value, variants, on });
@@ -268,6 +274,8 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
       parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${[...parent.children].indexOf(node) + 1})`);
       node = parent;
     }
+    // Anchored to body, or the same shape would match anywhere below.
+    if (node === document.body) parts.unshift("body");
     return parts.join(" > ");
   };
 
@@ -550,11 +558,41 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
           css: cleanCss(v.css),
         }),
       });
-      const data = (await res.json()) as { file?: string; error?: string };
+      const data = (await res.json()) as { file?: string; name?: string; canApply?: boolean; error?: string };
       if (!res.ok) throw new Error(data.error ?? `The helper answered ${res.status}.`);
-      say(`Saved “${v.name}”. Ask Claude to write it into the component.`);
+      if (!data.canApply || !data.name) return say(`Saved “${v.name}”. Ask Claude to write it into the component.`);
+      if (busy) return;
+      busy = true;
+      const btn = $<HTMLButtonElement>("[data-act=save]");
+      btn.disabled = true;
+      btn.textContent = "Writing it in…";
+      say("Claude is writing it into the component's styles (about a minute or two).");
+      try {
+        const done = await writer.apply("design", data.name, v.name);
+        // The component's own styles now look like this: take the variation off and reload.
+        on = -1;
+        applyVariant();
+        remember();
+        say(`${done.summary} Reloading.`);
+        window.setTimeout(() => location.reload(), 1800);
+      } finally {
+        busy = false;
+        btn.disabled = false;
+        btn.textContent = "Put it in the app";
+      }
     } catch (e) {
-      say(`Couldn't save: ${(e as Error).message}`, true);
+      say(`Couldn't put it in the app: ${(e as Error).message}`, true);
+    }
+  }
+
+  async function undoApply() {
+    try {
+      say("Taking it back out of the code…");
+      const summary = await writer.undo();
+      say(`${summary} Reloading.`);
+      window.setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+      say(`Couldn't undo: ${(e as Error).message}`, true);
     }
   }
 
@@ -594,6 +632,7 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
       )
       .join("");
     out("kept-count").textContent = kept.length ? String(kept.length) : "";
+    out("applied").innerHTML = appliedRow(writer.last, esc);
     follow();
   }
 
@@ -652,6 +691,7 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
       render();
     } else if (act === "keep") keep();
     else if (act === "save") void save();
+    else if (act === "undo-apply") void undoApply();
   });
 
   // Original: click toggles, or hold.
@@ -685,4 +725,21 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
   setOpen(load(openKey, false));
   applyVariant();
   render();
+  // An apply that was still running when the page reloaded: pick up how it went.
+  const recover = async () => {
+    const got = await writer.recover();
+    if (got === "waiting") {
+      say("Still writing it into the code…");
+      window.setTimeout(recover, 3000);
+    } else if (got) {
+      // The component's styles look like this now; the variation on top would double it.
+      on = -1;
+      applyVariant();
+      remember();
+      say(`In the app: ${got.summary}`);
+      render();
+    }
+  };
+  void recover();
+
 }

@@ -441,6 +441,8 @@ export function mountEditor(options: EditorOptions | string): void {
       parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${index})`);
       node = parent;
     }
+    // Anchor a path that reached the top to body, or it would match the same shape anywhere below.
+    if (node === document.body) parts.unshift("body");
     return parts.join(" > ");
   };
   const CSS_ESCAPE = (s: string) => (typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(s) : s);

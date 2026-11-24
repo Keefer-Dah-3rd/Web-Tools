@@ -11,6 +11,7 @@
  * Site-specific data (which variables, which steps, which pairings) comes from a PaletteSite; see
  * sites/mibbit-palette.ts.
  */
+import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
 import { HARMONIES, type Harmony, contrast, hexToLch, hueDelta, lchToHex, scaleAtHue, scaleFromSeed, turnScale } from "./palette";
 
 export interface ScaleSpec {
@@ -150,12 +151,13 @@ input[type=range] { width: 100%; accent-color: #ff8a65; }
 .card .x { margin-left: 4px; padding: 0 6px; border: 0; background: none; color: #7e8a9a; }
 .card .x:hover { color: #ff9a8a; }
 .note { color: #8e9aab; font-size: 11px; margin: 4px 0 0; }
+.head, .status, .foot, .applied { flex: none; }
 .status { min-height: 16px; color: #b7f0c0; font-size: 11px; padding: 0 12px 8px; }
 .status.err { color: #ff9a8a; }
 .foot { display: flex; gap: 6px; padding: 10px 12px 8px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .foot .primary { flex: 1; }
 .busy { opacity: .7; pointer-events: none; }
-`;
+${APPLIED_STYLE}`;
 
 const HTML = `
 <button class="pill" data-act="open" title="Colour Lab"><i></i>Colour Lab</button>
@@ -207,9 +209,10 @@ const HTML = `
     </section>
   </div>
   <div class="status" data-out="status"></div>
+  <div data-out="applied"></div>
   <div class="foot">
     <button data-act="reset" title="Back to the app's own colours">Reset</button>
-    <button class="primary" data-act="save" title="Hand this palette to Claude to write into the tokens">Save palette</button>
+    <button class="primary" data-act="save" title="Write this palette into the app's colour tokens (on the project's branch)">Put it in the app</button>
   </div>
 </div>`;
 
@@ -271,6 +274,7 @@ export function mountColourLab(options: LabOptions): void {
   let ideas: Candidate[] = load<Candidate[]>(ideasKey, []);
   let comparing = false;
   let showPairs = false;
+  const writer = new CodeWriter(endpoint, storagePrefix, "colour");
 
   // ---- the override sheet: unlayered :root rules beat the app's layered tokens
 
@@ -447,6 +451,7 @@ export function mountColourLab(options: LabOptions): void {
     out("kept-count").textContent = kept.length ? String(kept.length) : "";
     out("moods").innerHTML = site.moods.map((m) => `<button data-mood="${escapeHtml(m)}">${escapeHtml(m)}</button>`).join("");
     $<HTMLButtonElement>("[data-act=compare]").classList.toggle("on", comparing);
+    out("applied").innerHTML = appliedRow(writer.last, escapeHtml);
   }
 
   const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -520,6 +525,7 @@ export function mountColourLab(options: LabOptions): void {
     } else if (act === "keep") keep();
     else if (act === "ask") void ask();
     else if (act === "save") void save();
+    else if (act === "undo-apply") void undoApply();
   });
 
   // Original: hold the button (or O) to see the app's own colours; a click toggles.
@@ -647,11 +653,46 @@ export function mountColourLab(options: LabOptions): void {
     };
     try {
       const res = await fetch(`${endpoint}/palette-save`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-      const data = (await res.json()) as { file?: string; error?: string };
+      const data = (await res.json()) as { file?: string; name?: string; canApply?: boolean; error?: string };
       if (!res.ok) throw new Error(data.error ?? `The helper answered ${res.status}.`);
-      say(`Saved “${name}”. Ask Claude to apply it to the tokens.`);
+      if (!data.canApply || !data.name) return say(`Saved “${name}”. Ask Claude to apply it to the tokens.`);
+      const btn = $<HTMLButtonElement>("[data-act=save]");
+      btn.disabled = true;
+      btn.textContent = "Writing it in…";
+      say("Writing the palette into the app's colour tokens and re-checking contrast.");
+      try {
+        const done = await writer.apply("palette", data.name, name);
+        // The tokens now hold this palette: start the lab fresh from them.
+        state = { ...ORIGINAL };
+        store(stateKey, state);
+        say(`${done.summary} Reloading with it as the app's own colours.`);
+        window.setTimeout(() => location.reload(), 1600);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Put it in the app";
+      }
     } catch (e) {
-      say(`Couldn't save: ${(e as Error).message}`, true);
+      say(`Couldn't put it in the app: ${(e as Error).message}`, true);
+    }
+  }
+
+  async function undoApply() {
+    // Forget the lab's own preview first: the dev server may reload the page before Undo answers,
+    // and the app should come back in its restored colours, not this palette on top.
+    const keep = state;
+    try {
+      localStorage.removeItem(stateKey);
+    } catch {
+      /* fine */
+    }
+    try {
+      say("Taking it back out of the code…");
+      const summary = await writer.undo();
+      say(`${summary} Reloading.`);
+      window.setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+      store(stateKey, keep);
+      say(`Couldn't undo: ${(e as Error).message}`, true);
     }
   }
 
@@ -678,5 +719,20 @@ export function mountColourLab(options: LabOptions): void {
 
   setOpen(load(openKey, false));
   apply(false);
+  // An apply that was still running when the page reloaded: pick up how it went.
+  const recover = async () => {
+    const got = await writer.recover();
+    if (got === "waiting") {
+      say("Still writing it into the code…");
+      window.setTimeout(recover, 3000);
+    } else if (got) {
+      // The tokens hold the palette now; the lab's own override would double it.
+      state = { ...ORIGINAL };
+      say(`In the app: ${got.summary}`);
+      apply();
+    }
+  };
+  void recover();
+
   if (!same(state, ORIGINAL)) say("Your last palette is on. Reset goes back to the app's own.");
 }

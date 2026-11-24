@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFile
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { applySave } from "./apply.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_BRIEF = join(HERE, "..", "page-editor", "briefs", "default.md");
@@ -254,6 +255,8 @@ export function configFor(options, base) {
     paletteBrief: options.paletteBrief ? at(options.paletteBrief) : null,
     designBrief: options.designBrief ? at(options.designBrief) : null,
     designFacts: (options.designFacts ?? []).map(at),
+    // Writing saves into the project's code (apply.mjs): the project folder and its branch.
+    apply: options.apply ? { ...options.apply, repo: at(options.apply.repo) } : null,
     facts: (options.facts ?? []).map(at),
     model: options.model ?? process.env.PAGE_EDITOR_MODEL ?? "claude-opus-5-5",
     effort: options.effort ?? "medium",
@@ -309,11 +312,18 @@ export function handleEdits(cfg, req, res) {
   if (req.method === "GET") {
     const page = new URL(req.url ?? "", "http://x").searchParams.get("page") ?? "";
     const file = join(OUT, `${page}.applied.json`);
-    if (!/^[a-z0-9-]{1,40}$/.test(page) || !existsSync(file)) return reply(200, { applied: null });
+    const failed = join(OUT, `${page}.apply-error.json`);
+    let error = null;
     try {
-      return reply(200, { applied: JSON.parse(readFileSync(file, "utf8")).savedAt ?? null });
+      if (/^[a-z0-9-]{1,40}$/.test(page) && existsSync(failed)) error = JSON.parse(readFileSync(failed, "utf8"));
     } catch {
-      return reply(200, { applied: null });
+      error = null;
+    }
+    if (!/^[a-z0-9-]{1,40}$/.test(page) || !existsSync(file)) return reply(200, { applied: null, error });
+    try {
+      return reply(200, { applied: JSON.parse(readFileSync(file, "utf8")).savedAt ?? null, error });
+    } catch {
+      return reply(200, { applied: null, error });
     }
   }
   if (req.method !== "POST") return reply(405, { error: "GET or POST only" });
@@ -329,7 +339,15 @@ export function handleEdits(cfg, req, res) {
       if (!/^[a-z0-9-]{1,40}$/.test(page) || !Array.isArray(data.edits)) return reply(400, { error: "bad payload" });
       mkdirSync(OUT, { recursive: true });
       writeFileSync(join(OUT, `${page}.json`), `${JSON.stringify(data, null, 2)}\n`);
-      reply(200, { file: join(OUT, `${page}.json`), edits: data.edits.length });
+      const failed = join(OUT, `${page}.apply-error.json`);
+      if (existsSync(failed)) unlinkSync(failed);
+      reply(200, { file: join(OUT, `${page}.json`), edits: data.edits.length, applying: !!cfg.apply?.autoPage });
+      // Write the edits into the code in the background; the toolbar reloads once <page>.applied.json says so.
+      if (cfg.apply?.autoPage && data.edits.length) {
+        applySave(cfg, "page", `${page}.json`).catch((e) =>
+          writeFileSync(failed, `${JSON.stringify({ savedAt: data.savedAt, message: String(e?.message ?? e) })}\n`),
+        );
+      }
     } catch {
       reply(400, { error: "not JSON" });
     }
@@ -436,7 +454,7 @@ export function handlePaletteSave(cfg, req, res) {
     mkdirSync(cfg.editsDir, { recursive: true });
     const file = join(cfg.editsDir, `palette-${slug}.json`);
     writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
-    reply(200, { file });
+    reply(200, { file, name: `palette-${slug}.json`, canApply: !!cfg.apply });
   });
 }
 
@@ -536,6 +554,39 @@ export function handleDesignSave(cfg, req, res) {
     mkdirSync(cfg.editsDir, { recursive: true });
     const file = join(cfg.editsDir, `design-${slug}.json`);
     writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
-    reply(200, { file });
+    reply(200, { file, name: `design-${slug}.json`, canApply: !!cfg.apply });
   });
+}
+
+// ---- writing saves into the code (apply.mjs)
+
+/** POST <endpoint>/apply {kind: "palette" | "design", name}: write a save into the code and commit it. */
+export function handleApply(cfg, req, res) {
+  jsonBody(req, res, 10_000, async (data, reply) => {
+    if (!["palette", "design"].includes(data.kind)) return reply(400, { error: "Only palettes and designs apply from here." });
+    const { applySave } = await import("./apply.mjs");
+    try {
+      reply(200, await applySave(cfg, data.kind, String(data.name ?? "")));
+    } catch (e) {
+      reply(409, { error: String(e?.message ?? e) });
+    }
+  });
+}
+
+/** POST <endpoint>/undo {commit}: revert one commit the helper made. */
+export function handleUndo(cfg, req, res) {
+  jsonBody(req, res, 10_000, async (data, reply) => {
+    const { undoApply } = await import("./apply.mjs");
+    try {
+      reply(200, await undoApply(cfg, String(data.commit ?? "")));
+    } catch (e) {
+      reply(409, { error: String(e?.message ?? e) });
+    }
+  });
+}
+
+/** GET <endpoint>/applied: what the helper has written into the code lately, and what it's doing now. */
+export async function handleApplied(cfg, req, res) {
+  const { appliedLog } = await import("./apply.mjs");
+  replyWith(res)(200, cfg.apply ? appliedLog(cfg) : { log: [], busy: null });
 }

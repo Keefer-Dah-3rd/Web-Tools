@@ -30,7 +30,8 @@ behaviour. Write it as nested CSS where `&` is the part itself:
   Never target anything outside the part.
 - Colours, surfaces, radii, shadows, fonts and spacing come from the tokens listed, by name
   (`var(--token)`), never as raw hex or rgb. Roles only (`--color-…`, `--surface-…`): never
-  palette steps. Plain lengths (px, em, %) are fine for sizes and gaps.
+  palette steps. Corners come from the radius ladder (`--radius-xs` … `--radius-md`): pick the
+  nearest step, never a raw px radius. Plain lengths (px, em, %) are fine for sizes and gaps.
 - No `@import`, no `url()`, no `content:` that adds words, no `display: none` on anything that
   holds a control or text the user needs, no `position: fixed`.
 - The part sits in a dense layout: don't change its outer width or height by more than a few
