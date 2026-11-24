@@ -212,3 +212,23 @@ recolours live, because the lab overrides the scale variables on `:root`.
 Code: `live-editor/colour/palette.ts` (the maths, tested in `test/palette.test.ts`),
 `live-editor/colour/lab.ts` (the panel), `live-editor/sites/mibbit-palette.ts` (Mibbit's scales and
 pairings) and `sites/mibbit-palette-brief.md` (what Claude is told).
+
+#### Design Generator (Mibbit)
+
+The **✦ Design** pill (bottom left, above Colour Lab) makes new designs for one part of the app,
+tried in place. **◎ Pick a part** and click anything (↑ ↓ while picking, or **Bigger** /
+**Smaller**, change how much of it you take); choose **Every one like it** (every element with that
+class, e.g. all 16 pattern chips) or **Just this one**. Say what to try (or tap a quick pick) and
+**✦ Make 3 variations**: Claude gets the part's markup, computed styles, the app's own CSS rules for
+it, the app's role tokens and Mibbit's OP-1 design-language guide, and writes three CSS-only
+variations (about 30–60 seconds). The first goes on the app at once; click a card to switch,
+**Original** (or hold O) to compare, **More** for three in other directions. The app keeps working:
+markup, words and behaviour are untouched.
+
+**Keep** remembers a variation (with its part) for later; **Save design** writes
+`live-editor/edits/mibbit/design-<name>.json` (the part, its component chain, the request and the
+CSS) for Claude to write into the component's stylesheet. Parts drawn on a canvas say so: CSS can
+change their frame, not what's drawn.
+
+Code: `live-editor/design/generator.ts`, `sites/mibbit-design.ts` (quick picks, which tokens) and
+`sites/mibbit-design-brief.md` plus the design facts in `mibbit.json` (what Claude is told).

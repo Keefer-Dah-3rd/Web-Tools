@@ -252,6 +252,8 @@ export function configFor(options, base) {
     editsDir: at(options.editsDir ?? "page-edits"),
     brief: options.brief ? at(options.brief) : DEFAULT_BRIEF,
     paletteBrief: options.paletteBrief ? at(options.paletteBrief) : null,
+    designBrief: options.designBrief ? at(options.designBrief) : null,
+    designFacts: (options.designFacts ?? []).map(at),
     facts: (options.facts ?? []).map(at),
     model: options.model ?? process.env.PAGE_EDITOR_MODEL ?? "claude-opus-5-5",
     effort: options.effort ?? "medium",
@@ -433,6 +435,106 @@ export function handlePaletteSave(cfg, req, res) {
     const slug = clip(data.name, 60).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "palette";
     mkdirSync(cfg.editsDir, { recursive: true });
     const file = join(cfg.editsDir, `palette-${slug}.json`);
+    writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+    reply(200, { file });
+  });
+}
+
+// ---- Design Generator (design/generator.ts): CSS variations of one part, and saving one.
+
+const DESIGN_SCHEMA = {
+  type: "object",
+  properties: {
+    diagnosis: { type: "string" },
+    variants: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { name: { type: "string" }, why: { type: "string" }, css: { type: "string" } },
+        required: ["name", "why", "css"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["diagnosis", "variants"],
+  additionalProperties: false,
+};
+
+/** The design brief plus the site's design facts (its design-language guide), as the system prompt. */
+function designSystem(cfg) {
+  const parts = [briefFrom(cfg.designBrief)];
+  let room = 30000;
+  for (const file of cfg.designFacts ?? []) {
+    if (!existsSync(file) || room <= 0) continue;
+    const text = readFileSync(file, "utf8").slice(0, room);
+    room -= text.length;
+    parts.push(`## Design facts: ${file.split("/").slice(-2).join("/")}\n\n${text}`);
+  }
+  return parts.join("\n\n");
+}
+
+function designPrompt(req) {
+  const t = req.target ?? {};
+  const raw = (v, max) => String(v ?? "").slice(0, max);
+  return [
+    "## What the designer asked",
+    `"${clip(req.ask, 600)}"`,
+    "",
+    "## The part",
+    `${clip(t.label, 120)}: ${t.scope === "all" ? `every one like it (${Number(t.count) || 1} on screen), selector ${clip(t.selector, 200)}` : `just this one, selector ${clip(t.selector, 400)}`}`,
+    t.source ? `Component: ${clip(t.source, 200)}` : "",
+    t.canvas ? "It contains a canvas: CSS can style its frame and the HTML around it, not what is drawn inside." : "",
+    `Viewport: ${Number(req.viewport?.width) || 0}×${Number(req.viewport?.height) || 0}`,
+    "",
+    "## Its markup (trimmed)",
+    raw(req.markup, 7000),
+    "",
+    "## Its computed style",
+    raw(req.computed, 1500),
+    Array.isArray(req.children) && req.children.length ? ["", "## Its direct children (computed)", ...req.children.slice(0, 6).map((c) => `- ${raw(c, 700)}`)].join("\n") : "",
+    "",
+    "## The app's CSS rules that style it now",
+    raw(req.rules, 14000) || "(none found)",
+    "",
+    "## Tokens you may use (name: value now)",
+    raw(req.tokens, 16000),
+    list(req.avoid, 12, 200).length ? ["", "## Already shown (go somewhere different)", ...list(req.avoid, 12, 200).map((a) => `- ${a}`)].join("\n") : "",
+    "",
+    "Write 3 variations.",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+async function design(cfg, req) {
+  if (!cfg.designBrief) return { error: "This site has no design brief (designBrief in its config)." };
+  const system = designSystem(cfg);
+  const prompt = designPrompt(req);
+  const cli = await askCli(cfg, system, prompt, DESIGN_SCHEMA);
+  if (cli.ok) return { ...cli.answer, via: "Claude Code" };
+  if (!cfg.sessionFallback) return { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error };
+  const session = await askSession(cfg, system, prompt, DESIGN_SCHEMA);
+  if (session.ok) return { ...session.answer, via: "Claude session" };
+  return { error: `${cli.error} No Claude session answered either.` };
+}
+
+/** POST <endpoint>/design: a picked part and an ask in, three CSS variations out. */
+export function handleDesign(cfg, req, res) {
+  jsonBody(req, res, 400_000, async (data, reply) => {
+    if (!clip(data.ask, 600)) return reply(400, { error: "Say what to try first." });
+    if (!clip(data.target?.selector, 400)) return reply(400, { error: "Pick a part first." });
+    const answer = await design(cfg, data);
+    reply(answer.error ? 502 : 200, answer);
+  });
+}
+
+/** POST <endpoint>/design-save: the chosen variation, written to <editsDir>/design-<name>.json for Claude. */
+export function handleDesignSave(cfg, req, res) {
+  jsonBody(req, res, 200_000, (data, reply) => {
+    if (!data || typeof data.css !== "string" || !data.css.trim() || !data.target?.selector) return reply(400, { error: "No variation to save." });
+    const slug = clip(data.name, 60).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "design";
+    mkdirSync(cfg.editsDir, { recursive: true });
+    const file = join(cfg.editsDir, `design-${slug}.json`);
     writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
     reply(200, { file });
   });

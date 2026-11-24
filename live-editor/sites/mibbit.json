@@ -8,5 +8,9 @@
   "editsDir": "../edits/mibbit",
   "brief": "mibbit-brief.md",
   "facts": [],
-  "paletteBrief": "mibbit-palette-brief.md"
+  "paletteBrief": "mibbit-palette-brief.md",
+  "designBrief": "mibbit-design-brief.md",
+  "designFacts": [
+    "../../../../mibbit/mibbit_code/mibbit/.cursor/skills/op1-design-language/SKILL.md"
+  ]
 }

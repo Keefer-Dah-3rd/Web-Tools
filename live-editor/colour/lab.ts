@@ -341,7 +341,12 @@ export function mountColourLab(options: LabOptions): void {
     panel.hidden = !open;
     pill.hidden = open;
     store(openKey, open);
+    if (open) window.dispatchEvent(new CustomEvent("review-tool:open", { detail: "colour-lab" }));
   };
+  // Another left-side tool opened: fold out of its way.
+  window.addEventListener("review-tool:open", (e) => {
+    if ((e as CustomEvent).detail !== "colour-lab" && !panel.hidden) setOpen(false);
+  });
 
   const strip = (hexes: string[], anchor?: number, mini = false) =>
     `<div class="strip${mini ? " mini" : ""}" style="--n:${hexes.length}">${hexes
