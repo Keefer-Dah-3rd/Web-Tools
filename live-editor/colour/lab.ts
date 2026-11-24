@@ -129,6 +129,9 @@ const STYLE = `
   color: #e9edf3; font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   background: rgba(22, 25, 31, 0.95); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
   border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.4); }
+/* Docked (a dock opens it): the left-hand slot every tool shares, fixed in place. */
+:host([data-docked]) .panel { left: 8px; top: 36px; max-height: calc(100vh - 84px); }
+:host([data-docked]) .head { cursor: default; }
 .head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; cursor: grab; user-select: none; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
 .head b { flex: 1; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
 .head .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--seed, #AA0017); box-shadow: 0 0 0 3px rgba(255,255,255,.12); }
@@ -451,13 +454,52 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     });
   }
 
+  // ---- undo / redo: every change to the palette, slider drags folded into one step
+  let past: string[] = [];
+  let future: string[] = [];
+  let lastStep = 0;
+  const record = () => {
+    const snap = JSON.stringify(state);
+    if (snap === past[past.length - 1]) return;
+    const now = Date.now();
+    if (now - lastStep < 600 && past.length > 1) past[past.length - 1] = snap;
+    else past.push(snap);
+    if (past.length > 100) past.shift();
+    future = [];
+    lastStep = now;
+  };
+  const step = (from: string[], to: string[], word: string) => {
+    if (from.length < (word === "Undone" ? 2 : 1)) return say(word === "Undone" ? "Nothing to undo." : "Nothing to redo.");
+    if (word === "Undone") to.push(from.pop()!);
+    else past.push(from.pop()!);
+    state = { ...ORIGINAL, ...JSON.parse(past[past.length - 1]) };
+    lastStep = 0;
+    store(stateKey, state);
+    apply(false);
+    say(`${word}.`);
+  };
+  const undo = () => step(past, future, "Undone");
+  const redo = () => step(future, past, "Redone");
+  window.addEventListener("review-tool:history", (e) => {
+    const { target, redo: again } = (e as CustomEvent<{ target: string; redo: boolean }>).detail;
+    if (target === host.id) (again ? redo : undo)();
+  });
+
   let frame = 0;
   function apply(save = true) {
     const sc = scalesFor(state);
     const css = cssFor(sc);
-    sheet.textContent = comparing ? "" : css;
+    const next = comparing ? "" : css;
+    if (sheet.textContent !== next) {
+      sheet.textContent = next;
+      // Canvases that resolved their colours once (waveforms, scopes) listen and redraw.
+      window.dispatchEvent(new Event("palettechange"));
+    }
     host.style.setProperty("--seed", state.seed);
-    if (save) store(stateKey, state);
+    if (save) {
+      store(stateKey, state);
+      record();
+    }
     if (!comparing) {
       try {
         localStorage.setItem(cssKey, css);
@@ -838,7 +880,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   // Drag by the header.
   const head = $(".head");
   head.addEventListener("pointerdown", (e) => {
-    if ((e.target as HTMLElement).closest("button")) return;
+    if ((e.target as HTMLElement).closest("button") || host.hasAttribute("data-docked")) return;
     const start = { x: e.clientX, y: e.clientY, left: panel.offsetLeft, top: panel.offsetTop };
     head.setPointerCapture(e.pointerId);
     const move = (m: PointerEvent) => {
@@ -857,6 +899,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   root.addEventListener("keydown", (e) => e.stopPropagation());
 
   setOpen(load(openKey, false));
+  past = [JSON.stringify(state)];
   apply(false);
   // An apply that was still running when the page reloaded: pick up how it went.
   const recover = async () => {

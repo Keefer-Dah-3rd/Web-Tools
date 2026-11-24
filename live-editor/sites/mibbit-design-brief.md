@@ -40,6 +40,21 @@ behaviour. Write it as nested CSS where `&` is the part itself:
   variation changes; don't restate what stays.
 - Keep text contrast: body text on its surface at 4.5:1, indicators at 3:1.
 
+## When the part is the whole app
+
+The selector is `:root` and `&` is the whole page. Change the app's character everywhere at once:
+
+- Set **role tokens** on `&` first: corners (`--radius-*`), shadows and neumorphism (`--shadow-*`,
+  `--neu-*`), surfaces (`--surface-*`), fonts (`--font-*`), spacing. Every component reads them,
+  so a few lines restyle the whole app consistently. Colour roles (`--surface-*`, `--color-*`,
+  `--display-*`) must each point at ONE palette step (`var(--warm-900)`): the app's contrast check
+  reads nothing else, so no `color-mix()` there. Recipes (shadows, highlights, `--neu-*`) and
+  lengths may be built from tokens freely (`color-mix()` of tokens is fine). Never raw hex.
+- Then restyle up to a handful of the **most-used parts** listed (`& .class { … }`), only where
+  tokens can't reach.
+- Keep every part where it is and the same size: a whole-app variation changes the look, not the
+  layout. Don't touch colours of track pads or the brand: the Colour Lab owns the palette.
+
 ## The three variations
 
 Make three genuinely different answers to what the designer asked: different directions, not

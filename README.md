@@ -189,7 +189,12 @@ Its logs are in `~/Library/Logs/mibbit-tools/`; the helper it starts runs until 
 Then open <http://localhost:5173/?tools>. A small dock sits in the bottom-left corner: **✎ Edit**
 (⌥E, the toolbar), **◐ Colour** (⌥C, Colour Lab), **✦ Design** (⌥D, Design Generator); its dot (⌥H)
 hides every tool for a clean look at the app, with your changes still on. If the helper isn't
-running, a note in that corner says so. The app's dev-only loader (`web/src/dev/designTools.ts`
+running, a note in that corner says so.
+
+All three open in the same docked slot on the left, one at a time (opening one folds the
+others). **⌘Z / ⌘⇧Z** undo and redo in the tool you last used (the toolbar's edits, the Colour
+Lab's palette, the Design Generator's part, variations and choice); once you click the app itself,
+they're the app's own undo and redo again. In a text field they undo your typing. The app's dev-only loader (`web/src/dev/designTools.ts`
 in the Mibbit repo) pulls the toolbar from the helper and keeps it on in that browser;
 `?tools=off` hides it. The Type style and colour buttons are Mibbit's own (fonts and tokens from
 `web/src/styles/tokens.css`), rewrites follow `sites/mibbit-brief.md` (Mibbit's voice), and saves go
@@ -211,8 +216,10 @@ recolours live, because the lab overrides the scale variables on `:root`.
   green, LCD phosphor, gold, the Nibbit character) and Tracks (the 16 track colours, turned as one
   wheel so they stay distinct). **Brand only** goes back to the brand and the casing's hue. Sliders
   set how far the casing and displays lean in, and how vivid accents and tracks are (muted to
-  neon). Error, warning, success and info never move: they carry meaning. The theme is put on
-  before the app's first frame on the next load, so canvases (waveforms) draw in it too.
+  neon). Error, warning, success and info never move: they carry meaning. Canvases (waveforms,
+  the analyzer) redraw in the theme as it changes: the lab fires `palettechange` and Mibbit's
+  canvases re-read their colours (`onPaletteChange` in its `resolvedPalette.ts`); on a reload the
+  theme is put on before the first frame.
 - **Contrast** checks every role pairing from Mibbit's `scripts/palette-contrast.py` live; click it
   for the list, failures first.
 - **Original** (click, or hold O) flips back to the app's own colours to compare.
@@ -240,6 +247,15 @@ variations (about 30–60 seconds). The first goes on the app at once; click a c
 **Original** (or hold O) to compare, **More** for three in other directions. The app keeps working:
 markup, words and behaviour are untouched.
 
+**▣ Whole app** designs everything at once: Claude sees the 40 most-used parts on screen and the
+role tokens, and its variations restyle the shared tokens (corners, shadows, surfaces, type) and
+those parts. Colour roles stay single palette steps (the Colour Lab owns colour, and the contrast
+check reads only that).
+
+**Inspiration**: drop, paste (⌘V) or choose up to four images. They're kept by the helper
+(`live-editor/edits/<site>/inspiration/`) and Claude looks at each one when it designs (Claude Code
+gets the Read tool for that folder only), saying in each variation which image it draws on.
+
 **Keep** remembers a variation (with its part) for later; **Put it in the app** has Claude write it
 into the component's stylesheet (see Putting saves into the code below), keeping a record in
 `live-editor/edits/mibbit/design-<name>.json` (the part, its component chain, the request and the CSS). Parts drawn on a canvas say so: CSS can
@@ -256,7 +272,7 @@ them into the project on its branch (`color-edits` for Mibbit), one commit per s
 | Save | How it gets into the code |
 |---|---|
 | Colour Lab, **Put it in the app** | No AI: the changed scale steps and accent colours are written into `web/src/styles/tokens.css`; a themed track wheel also updates its copy in `web/src/engine/padColors.ts` and the test that pins track 1, and that test must pass. `scripts/palette-contrast.py` re-runs (a failing pairing refuses the palette) and its table in `docs/research/` is regenerated. Any failure puts every file back. |
-| Design Generator, **Put it in the app** | Claude Code writes the variation into the component's stylesheet, replacing what it overrides (CSS files under `web/src/styles/` only). |
+| Design Generator, **Put it in the app** | Claude Code writes the variation into the component's stylesheet, replacing what it overrides (CSS files under `web/src/styles/` only). A whole-app design may also change roles in `tokens.css`; the contrast check then runs, and a failure goes back to Claude to adjust (twice at most) before it's dropped. |
 | Toolbar, **Save** | Claude Code writes the text and style edits into the code (`web/src/` only); the toolbar reloads when they're in. |
 
 Claude Code runs headless in restricted mode: Read, Edit, Grep and Glob only, confined to the

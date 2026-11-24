@@ -161,9 +161,14 @@ const claudeBin = () => {
 };
 
 /** One headless Claude Code call: no tools, no session saved, run outside the repo so no project files load. */
-function askCli(cfg, system, prompt, schema) {
+/**
+ * opts.readDir: let Claude read files in that one folder (images to look at), and nothing else:
+ * the Read tool only, restricted mode, no MCP servers.
+ */
+function askCli(cfg, system, prompt, schema, opts = {}) {
   return new Promise((resolve) => {
-    const args = ["-p", prompt, "--model", cfg.model, "--effort", cfg.effort, "--tools", "", "--no-session-persistence", "--output-format", "json", "--system-prompt", system, "--json-schema", JSON.stringify(schema)];
+    const tools = opts.readDir ? ["--tools", "Read", "--restricted", "--strict-mcp-config", "--add-dir", opts.readDir] : ["--tools", ""];
+    const args = ["-p", prompt, "--model", cfg.model, "--effort", cfg.effort, ...tools, "--no-session-persistence", "--output-format", "json", "--system-prompt", system, "--json-schema", JSON.stringify(schema)];
     let out = "";
     let err = "";
     let child;
@@ -505,15 +510,16 @@ function designPrompt(req) {
     `"${clip(req.ask, 600)}"`,
     "",
     "## The part",
-    `${clip(t.label, 120)}: ${t.scope === "all" ? `every one like it (${Number(t.count) || 1} on screen), selector ${clip(t.selector, 200)}` : `just this one, selector ${clip(t.selector, 400)}`}`,
+    t.scope === "app"
+      ? "THE WHOLE APP (selector :root, so & is :root). Restyle it through the shared role tokens (set them on &) and rules for the most-used parts listed below (& .class)."
+      : `${clip(t.label, 120)}: ${t.scope === "all" ? `every one like it (${Number(t.count) || 1} on screen), selector ${clip(t.selector, 200)}` : `just this one, selector ${clip(t.selector, 400)}`}`,
     t.source ? `Component: ${clip(t.source, 200)}` : "",
     t.canvas ? "It contains a canvas: CSS can style its frame and the HTML around it, not what is drawn inside." : "",
     `Viewport: ${Number(req.viewport?.width) || 0}×${Number(req.viewport?.height) || 0}`,
     "",
-    "## Its markup (trimmed)",
-    raw(req.markup, 7000),
+    req.inventory ? ["## What's on screen: the most-used parts (class ×count “sample words”: computed style)", raw(req.inventory, 16000)].join("\n") : ["## Its markup (trimmed)", raw(req.markup, 7000)].join("\n"),
     "",
-    "## Its computed style",
+    req.inventory ? "## The page body's computed style" : "## Its computed style",
     raw(req.computed, 1500),
     Array.isArray(req.children) && req.children.length ? ["", "## Its direct children (computed)", ...req.children.slice(0, 6).map((c) => `- ${raw(c, 700)}`)].join("\n") : "",
     "",
@@ -533,8 +539,18 @@ function designPrompt(req) {
 async function design(cfg, req) {
   if (!cfg.designBrief) return { error: "This site has no design brief (designBrief in its config)." };
   const system = designSystem(cfg);
-  const prompt = designPrompt(req);
-  const cli = await askCli(cfg, system, prompt, DESIGN_SCHEMA);
+  const images = inspirationFiles(cfg, req.inspiration);
+  const prompt = designPrompt(req) + (images.length
+    ? [
+        "",
+        "",
+        "## Visual inspiration",
+        "The designer added these images as inspiration. Read each one before you write anything:",
+        ...images.map((f) => `- ${f}`),
+        "Take cues from them (palette relationships, shape language, depth and texture, density, the feel of the type) and translate them into Mibbit's tokens and parts. Don't copy logos, words or exact layouts. In each variation's why, say which image it draws on and how.",
+      ].join("\n")
+    : "");
+  const cli = await askCli(cfg, system, prompt, DESIGN_SCHEMA, images.length ? { readDir: inspirationDir(cfg) } : {});
   if (cli.ok) return { ...cli.answer, via: "Claude Code" };
   if (!cfg.sessionFallback) return { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error };
   const session = await askSession(cfg, system, prompt, DESIGN_SCHEMA);
@@ -595,4 +611,39 @@ export function handleUndo(cfg, req, res) {
 export async function handleApplied(cfg, req, res) {
   const { appliedLog } = await import("./apply.mjs");
   replyWith(res)(200, cfg.apply ? appliedLog(cfg) : { log: [], busy: null });
+}
+
+// ---- inspiration images for the Design Generator
+
+const inspirationDir = (cfg) => join(cfg.editsDir, "inspiration");
+const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
+/** The saved inspiration images a request names (by id), as absolute paths; unknown ids are dropped. */
+function inspirationFiles(cfg, ids) {
+  if (!Array.isArray(ids)) return [];
+  const dir = inspirationDir(cfg);
+  if (!existsSync(dir)) return [];
+  const files = readdirSync(dir);
+  return ids
+    .slice(0, 4)
+    .filter((id) => /^[a-f0-9]{16}$/.test(String(id)))
+    .map((id) => files.find((f) => f.startsWith(`${id}.`)))
+    .filter(Boolean)
+    .map((f) => join(dir, f));
+}
+
+/** POST <endpoint>/inspiration {dataUrl}: keep an image the designer added; answers its id. */
+export function handleInspiration(cfg, req, res) {
+  jsonBody(req, res, 12_000_000, async (data, reply) => {
+    const m = String(data.dataUrl ?? "").match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+    if (!m) return reply(400, { error: "That isn't a PNG, JPEG, WebP or GIF image." });
+    const bytes = Buffer.from(m[2], "base64");
+    if (bytes.length > 8_000_000) return reply(413, { error: "That image is over 8 MB." });
+    const { createHash } = await import("node:crypto");
+    const id = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+    const dir = inspirationDir(cfg);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${id}.${IMAGE_TYPES[m[1]]}`), bytes);
+    reply(200, { id });
+  });
 }

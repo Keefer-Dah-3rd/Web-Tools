@@ -133,6 +133,22 @@ async function typecheck(cfg, files) {
 
 const within = (file, globs) => globs.some((g) => (g.endsWith("/**") ? file.startsWith(g.slice(0, -2)) : file === g));
 
+/**
+ * Why the project's contrast script said no: its failing rows (a ❌ in a markdown table, or a
+ * line saying fail), or the error it stopped on (a role it can't read).
+ */
+function contrastWhy(res) {
+  // Only the required pairings: a "forbidden pairings" table lists rules, not failures.
+  const rows = res.stdout
+    .split(/\n## Forbidden/i)[0]
+    .split("\n")
+    .filter((l) => /❌|\bfail/i.test(l) && !/^\*\*/.test(l))
+    .map((l) => l.replace(/`/g, "").replace(/\s*\|\s*/g, " | ").replace(/^ \| | \| $/g, "").trim())
+    .slice(0, 5);
+  const stopped = (res.stderr.trim().split("\n").pop() ?? "").replace(/^\w*Error:\s*/, "");
+  return rows.length ? rows.join("\n") : stopped ? `It stopped on: ${stopped}` : "";
+}
+
 // ---- palette: deterministic
 
 const WHEEL_NAMES = ["orange", "amber", "yellow", "chartreuse", "green", "emerald", "cyan", "azure", "blue", "indigo", "violet", "purple", "magenta", "pink", "red", "crimson"];
@@ -217,8 +233,8 @@ async function applyPalette(cfg, save, untrackedBefore) {
     if (a.contrastScript) {
       const res = await run("python3", [a.contrastScript], a.repo);
       if (res.code !== 0) {
-        const fails = res.stdout.split("\n").filter((l) => /fail|✗|below/i.test(l)).slice(0, 6).join("\n");
-        throw new Error(`The palette fails the app's contrast check, so it wasn't applied.${fails ? `\n${fails}` : ""}`);
+        const why = contrastWhy(res);
+        throw new Error(`The palette fails the app's contrast check, so it wasn't applied.${why ? `\n${why}` : ""}`);
       }
       if (a.contrastDoc) {
         before.set(a.contrastDoc, readFileSync(join(a.repo, a.contrastDoc), "utf8"));
@@ -253,7 +269,7 @@ async function applyPalette(cfg, save, untrackedBefore) {
 
 // ---- design and page edits: Claude Code
 
-const designPrompt = (save, json) => `You are applying a design variation that the designer tried live in the running app and chose to keep. Here is the save:
+const designPrompt = (save, json) => save.target?.scope === "app" ? appDesignPrompt(json) : `You are applying a design variation that the designer tried live in the running app and chose to keep. Here is the save:
 
 \`\`\`json
 ${json}
@@ -270,6 +286,21 @@ Do this:
 4. Change only CSS files under web/src/styles/. Don't touch TSX, tokens.css or anything else. If the variation can't be written without a markup change, change nothing and say so.
 
 When done, reply with one plain sentence saying what changed and in which file.`;
+
+const appDesignPrompt = (json) => `You are applying a whole-app design variation that the designer tried live in the running app and chose to keep. Here is the save:
+
+\`\`\`json
+${json}
+\`\`\`
+
+The CSS that was tried is nested under :root (& is :root). Make the app look exactly as it did with it on:
+1. Declarations on & are role tokens (--radius-*, --shadow-*, --surface-*, --font-*, spacing …): change those roles where they are defined, in web/src/styles/tokens.css (the ROLES and recipe sections). Never change the palette scale steps (--brand-*, --warm-*, --cool-* and the like), and never add raw hex or rgb.
+   Colour roles (--surface-*, --color-*, --display-*) must stay a var() of ONE palette step (the project's contrast script reads nothing else): where the variation mixes colours (color-mix …) for one of them, point the role at the palette step nearest to what it showed. Shadows, highlights and other recipes may keep color-mix.
+2. Rules for & .class go into the stylesheet under web/src/styles/ that styles that class (Grep for it), changing the declarations they override, inside the same @layer. Don't append them as an extra override layer.
+3. Keep each file's style and comments; update a comment if it now says something untrue.
+4. Change only files under web/src/styles/. If something can't be written without a markup change, leave it and say so.
+
+When done, reply with one or two plain sentences saying what changed and where.`;
 
 const pagePrompt = (save, json) => `You are applying edits the designer made in the running app with the in-browser toolbar. Here is the save:
 
@@ -292,13 +323,15 @@ async function applyWithClaude(cfg, kind, save, untrackedBefore) {
   const prompt = kind === "design" ? designPrompt(save, json) : pagePrompt(save, json);
   const allowed = kind === "design" ? ["web/src/styles/**"] : ["web/src/**"];
   const answer = await claudeEdits(cfg, prompt);
-  const changed = await changedFiles(cfg, untrackedBefore);
+  let changed = await changedFiles(cfg, untrackedBefore);
   if (!answer.ok) {
     await putBack(cfg, changed, untrackedBefore);
     throw new Error(answer.error);
   }
   if (!changed.length) throw new Error(answer.summary || "Claude didn't change anything.");
-  const outside = changed.filter((f) => !within(f, allowed) || f === cfg.apply.tokens);
+  // tokens.css is the Colour Lab's, except that a whole-app design may change its roles.
+  const tokensOk = kind === "design" && save.target?.scope === "app";
+  const outside = changed.filter((f) => !within(f, allowed) || (f === cfg.apply.tokens && !tokensOk));
   if (outside.length) {
     await putBack(cfg, changed, untrackedBefore);
     throw new Error(`Claude changed files it shouldn't (${outside.join(", ")}), so nothing was kept.`);
@@ -308,7 +341,35 @@ async function applyWithClaude(cfg, kind, save, untrackedBefore) {
     await putBack(cfg, changed, untrackedBefore);
     throw new Error(`The change didn't type-check, so nothing was kept:\n${broken}`);
   }
-  const title = kind === "design" ? `Design: ${save.name} (${save.target?.label})` : `Page edits: ${save.page} (${save.edits?.length ?? 0} change${save.edits?.length === 1 ? "" : "s"})`;
+  // Tokens changed: the app's contrast pairings must still hold, and their table follows. A
+  // failure goes back to Claude (twice at most) to adjust the roles before the change is dropped.
+  if (changed.includes(cfg.apply.tokens) && cfg.apply.contrastScript) {
+    let res = await run("python3", [cfg.apply.contrastScript], cfg.apply.repo);
+    for (let round = 0; res.code !== 0 && round < 2; round++) {
+      const fix = await claudeEdits(
+        cfg,
+        `You just changed web/src/styles/tokens.css for a design the designer chose, and the app's contrast check (python3 ${cfg.apply.contrastScript}) now fails on:\n\n${contrastWhy(res)}\n\nAdjust only the roles you changed (point them at a darker or lighter palette step, or adjust a recipe) so every listed pairing clears its floor, staying as close to the design as you can. Each colour role stays a var() of one palette step. Change only web/src/styles/tokens.css. Reply with one sentence saying what you adjusted.`,
+      );
+      if (!fix.ok) break;
+      res = await run("python3", [cfg.apply.contrastScript], cfg.apply.repo);
+    }
+    if (res.code !== 0) {
+      await putBack(cfg, await changedFiles(cfg, untrackedBefore), untrackedBefore);
+      const why = contrastWhy(res);
+      throw new Error(`The change fails the app's contrast check, so nothing was kept.${why ? `\n${why}` : ""}`);
+    }
+    changed = await changedFiles(cfg, untrackedBefore);
+    const strayed = changed.filter((f) => !within(f, allowed) && !(f === cfg.apply.tokens && tokensOk));
+    if (strayed.length) {
+      await putBack(cfg, changed, untrackedBefore);
+      throw new Error(`Fixing contrast touched files it shouldn't (${strayed.join(", ")}), so nothing was kept.`);
+    }
+    if (cfg.apply.contrastDoc) {
+      writeFileSync(join(cfg.apply.repo, cfg.apply.contrastDoc), res.stdout);
+      if (!changed.includes(cfg.apply.contrastDoc)) changed.push(cfg.apply.contrastDoc);
+    }
+  }
+  const title = kind === "design" ? `Design: ${save.name} (${save.target?.scope === "app" ? "whole app" : save.target?.label})` : `Page edits: ${save.page} (${save.edits?.length ?? 0} change${save.edits?.length === 1 ? "" : "s"})`;
   const sha = await commit(cfg, changed, title);
   return { commit: sha, files: changed, summary: answer.summary };
 }

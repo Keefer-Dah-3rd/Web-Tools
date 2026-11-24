@@ -117,6 +117,9 @@ const STYLE = `
 }
 .bar.small { width: auto; }
 .bar.small .body, .bar.small .foot { display: none; }
+/* Docked (a dock opens it): the left-hand slot every tool shares, fixed in place. */
+:host([data-docked]) .bar { left: 8px; right: auto; top: 36px; width: 340px; max-height: calc(100vh - 84px); }
+:host([data-docked]) .head { cursor: default; }
 .head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; cursor: grab; user-select: none; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
 .bar.small .head { border-bottom: 0; }
 .head b { font-weight: 700; font-size: 12px; letter-spacing: 0.02em; flex: 1; white-space: nowrap; }
@@ -332,12 +335,13 @@ const HTML = `
     </div>
     <div class="fold" data-fold="keys">
       <button class="fold-head" data-foldbtn="keys"><span class="caret">▸</span> Shortcuts</button>
-      <div class="fold-body keys"><kbd>E</kbd> select on/off · <kbd>G</kbd> column grid · <kbd>↑</kbd><kbd>↓</kbd> parent/inside · <kbd>T</kbd> edit text · <kbd>B</kbd> pick blocks · <kbd>R</kbd> rewrite · <kbd>Delete</kbd> remove · <kbd>⌘Z</kbd> undo · <kbd>Esc</kbd> deselect</div>
+      <div class="fold-body keys"><kbd>E</kbd> select on/off · <kbd>G</kbd> column grid · <kbd>↑</kbd><kbd>↓</kbd> parent/inside · <kbd>T</kbd> edit text · <kbd>B</kbd> pick blocks · <kbd>R</kbd> rewrite · <kbd>Delete</kbd> remove · <kbd>⌘Z</kbd> undo · <kbd>⌘⇧Z</kbd> redo · <kbd>Esc</kbd> deselect</div>
     </div>
   </div>
   <div class="foot">
     <div class="row fill">
-      <button data-act="undo">Undo</button>
+      <button data-act="undo" title="Undo (⌘Z)">Undo</button>
+      <button data-act="redo" title="Redo (⌘⇧Z)">Redo</button>
       <button data-act="reset-all" class="danger">Reset all</button>
       <button data-act="copy">Copy</button>
     </div>
@@ -411,6 +415,8 @@ export function mountEditor(options: EditorOptions | string): void {
 
   let edits: Edit[] = [];
   let history: string[] = [];
+  /** States undone, for redo (cleared by any new change). */
+  let future: string[] = [];
   let picked: Element | null = null;
   let hovered: Element | null = null;
   let selecting = false; // off at first, so the page still plays; Select or E turns picking on
@@ -919,7 +925,10 @@ export function mountEditor(options: EditorOptions | string): void {
     } catch {
       /* private mode: edits still apply for this visit */
     }
-    if (remember) history.push(JSON.stringify(edits));
+    if (remember) {
+      history.push(JSON.stringify(edits));
+      future = [];
+    }
     if (history.length > 80) history.shift();
     render();
   };
@@ -935,17 +944,40 @@ export function mountEditor(options: EditorOptions | string): void {
   const undo = () => {
     if (history.length < 2) {
       if (edits.length) {
+        future.push(JSON.stringify(edits));
         edits = [];
         history = ["[]"];
         commit(false);
       }
       return;
     }
-    history.pop();
+    future.push(history.pop()!);
     edits = JSON.parse(history[history.length - 1]);
     commit(false);
-    say("Undone.");
+    say("Undone. ⌘⇧Z redoes it.");
   };
+  const redo = () => {
+    const next = future.pop();
+    if (next == null) return say("Nothing to redo.");
+    history.push(next);
+    edits = JSON.parse(next);
+    commit(false);
+    say("Redone.");
+  };
+  // With a dock, ⌘Z / ⌘⇧Z reach the tool you last used through it (dock.ts); the app keeps them otherwise.
+  window.addEventListener("review-tool:history", (e) => {
+    const { target, redo: again } = (e as CustomEvent<{ target: string; redo: boolean }>).detail;
+    if (target === host.id) (again ? redo : undo)();
+  });
+  // Folded by a dock: stop picking, so the app gets its clicks back.
+  window.addEventListener("review-tool:close", (e) => {
+    if ((e as CustomEvent).detail !== host.id) return;
+    if (editing) stopTyping(true);
+    selecting = false;
+    targeting = false;
+    place(hoverBox, null);
+    render();
+  });
 
   const payload = () => ({
     page,
@@ -1085,6 +1117,9 @@ export function mountEditor(options: EditorOptions | string): void {
       })
       .join("");
     $("[data-act=undo]").toggleAttribute("disabled", history.length < 2 && !edits.length);
+    $("[data-act=redo]").toggleAttribute("disabled", !future.length);
+    // Tells a dock this tool owns the page's clicks right now (so ⌘Z belongs to it).
+    host.toggleAttribute("data-active", selecting || targeting || !!editing);
     place(pickBox, picked);
   }
 
@@ -1267,6 +1302,7 @@ export function mountEditor(options: EditorOptions | string): void {
     else if (act === "grow") setScale((editFor(picked!, false)?.scale ?? 1) + 0.05);
     else if (act === "scale-reset") change((e) => (e.scale = undefined));
     else if (act === "undo") undo();
+    else if (act === "redo") redo();
     else if (act === "reset-all") {
       if (edits.length && window.confirm(`Throw away all ${edits.length} changes on this page?`)) {
         edits = [];
@@ -1305,7 +1341,7 @@ export function mountEditor(options: EditorOptions | string): void {
   // Drag the toolbar by its header.
   const head = $(".head");
   head.addEventListener("pointerdown", (event) => {
-    if ((event.target as HTMLElement).closest("button")) return;
+    if ((event.target as HTMLElement).closest("button") || host.hasAttribute("data-docked")) return;
     const r = bar.getBoundingClientRect();
     const dx = event.clientX - r.left;
     const dy = event.clientY - r.top;
@@ -1414,7 +1450,10 @@ export function mountEditor(options: EditorOptions | string): void {
       const typing = event.composedPath().some((n) => n instanceof HTMLInputElement || n instanceof HTMLTextAreaElement || (n instanceof HTMLElement && n.isContentEditable));
       if (typing) return;
       let used = true;
-      if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "z") undo();
+      if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "z") {
+        if (document.getElementById("design-dock")) used = false; // the dock routes it
+        else (event.shiftKey ? redo : undo)();
+      }
       else if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "s") void send();
       else if (event.metaKey || event.ctrlKey || event.altKey) used = false;
       else if (key.toLowerCase() === "b") setTargeting(!targeting);

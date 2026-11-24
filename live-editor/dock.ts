@@ -6,6 +6,12 @@
  * Shortcuts use Option (Alt) so they don't collide with an app's own single keys; they match by
  * physical key (⌥C types "ç" on a Mac). ⌥H hides every tool, outlines and all, for a clean look
  * at the app; press it again (or click the dock's dot) to bring them back as they were.
+ *
+ * Docked: every tool opens in the same left-hand slot, one at a time (opening one folds the
+ * others), fixed in place above the dock.
+ *
+ * ⌘Z / ⌘⇧Z go to the tool you last used (clicked in, or picking on the page with); when you last
+ * clicked the app itself, they're the app's own undo and redo, untouched.
  */
 
 /** What the dock needs to open and fold a panel. */
@@ -18,6 +24,8 @@ export interface PanelControl {
 export interface DockTool {
   /** Short label on the dock. */
   label: string;
+  /** The tool's host element id (for ⌘Z routing), e.g. "colour-lab". */
+  host?: string;
   /** One glyph before the label. */
   icon: string;
   /** Physical key for the ⌥ shortcut, e.g. "KeyC". */
@@ -64,14 +72,38 @@ export function mountDock(options: DockOptions): void {
   const hideKey = `${options.storagePrefix}:dock:hidden`;
   const editorKey = `${options.storagePrefix}:dock:editor`;
 
-  const items = [
-    { label: "Edit", icon: "✎", code: "KeyE", control: {
+  const items: (DockTool & { host: string })[] = [
+    { label: "Edit", icon: "✎", code: "KeyE", host: "live-editor", control: {
       open: () => { const h = editorHost(); if (h) h.style.display = ""; remember(editorKey, true); },
-      close: () => { const h = editorHost(); if (h) h.style.display = "none"; remember(editorKey, false); },
+      close: () => {
+        const h = editorHost();
+        if (h) h.style.display = "none";
+        remember(editorKey, false);
+        window.dispatchEvent(new CustomEvent("review-tool:close", { detail: "live-editor" }));
+      },
       isOpen: () => (editorHost()?.style.display ?? "none") !== "none",
     } },
-    ...options.tools,
+    ...options.tools.map((t) => ({ ...t, host: t.host ?? "" })),
   ];
+  // Every tool sits in the docked slot on the left.
+  for (const el of document.querySelectorAll<HTMLElement>("[data-review-tool]")) if (el !== host) el.setAttribute("data-docked", "");
+
+  /** The tool ⌘Z belongs to: the one last clicked in, or "app". */
+  let owner = "app";
+  const toolOf = (e: Event) => {
+    for (const n of e.composedPath()) if (n instanceof HTMLElement && n.hasAttribute("data-review-tool") && n !== host) return n.id;
+    return null;
+  };
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      const tool = toolOf(e);
+      if (tool) owner = tool;
+      else if (editorHost()?.hasAttribute("data-active")) owner = "live-editor"; // picking on the page
+      else if (!(e.composedPath() as Node[]).includes(host)) owner = "app";
+    },
+    true,
+  );
 
   root.innerHTML = `<style>${STYLE}</style><div class="dock" style="${place}">
     <button class="dot" data-act="hide" title="Hide every tool (⌥H)"><i></i></button>
@@ -115,7 +147,12 @@ export function mountDock(options: DockOptions): void {
     if (hidden) setHidden(false);
     const t = items[i].control;
     if (t.isOpen()) t.close();
-    else t.open();
+    else {
+      // One tool in the slot at a time.
+      items.forEach((other, j) => j !== i && other.control.isOpen() && other.control.close());
+      t.open();
+      owner = items[i].host || owner;
+    }
     render();
   };
 
@@ -128,6 +165,16 @@ export function mountDock(options: DockOptions): void {
   document.addEventListener(
     "keydown",
     (e) => {
+      // ⌘Z / ⌘⇧Z: to the tool you last used, unless you're typing in one of its fields (the field undoes).
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.code === "KeyZ") {
+        const typing = e.composedPath().some((n) => n instanceof HTMLInputElement || n instanceof HTMLTextAreaElement || (n instanceof HTMLElement && n.isContentEditable));
+        const tool = items.find((t) => t.host && t.host === owner && t.control.isOpen());
+        if (!tool || typing || hidden) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        window.dispatchEvent(new CustomEvent("review-tool:history", { detail: { target: tool.host, redo: e.shiftKey } }));
+        return;
+      }
       if (!e.altKey || e.metaKey || e.ctrlKey || e.repeat) return;
       if (e.code === "KeyH") setHidden(!hidden);
       else {
@@ -145,6 +192,9 @@ export function mountDock(options: DockOptions): void {
   root.addEventListener("pointerenter", render);
 
   if (!recall(editorKey, true)) items[0].control.close();
+  // Only one tool in the slot: keep the first one that's open.
+  const firstOpen = items.findIndex((t) => t.control.isOpen());
+  items.forEach((t, j) => j !== firstOpen && t.control.isOpen() && t.control.close());
   if (recall(hideKey, false)) window.setTimeout(() => setHidden(true), 0);
   render();
 }

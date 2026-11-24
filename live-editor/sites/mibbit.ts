@@ -52,7 +52,7 @@ const design = mountDesignGenerator({
 mountDock({
   storagePrefix: "mibbit-tools",
   tools: [
-    ...(colour ? [{ label: "Colour", icon: "◐", code: "KeyC", control: colour }] : []),
-    ...(design ? [{ label: "Design", icon: "✦", code: "KeyD", control: design }] : []),
+    ...(colour ? [{ label: "Colour", icon: "◐", code: "KeyC", host: "colour-lab", control: colour }] : []),
+    ...(design ? [{ label: "Design", icon: "✦", code: "KeyD", host: "design-generator", control: design }] : []),
   ],
 });

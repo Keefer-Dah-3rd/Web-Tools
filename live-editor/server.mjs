@@ -27,7 +27,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { build } from "esbuild";
-import { configFor, handleApplied, handleApply, handleDesign, handleDesignSave, handleEdits, handlePalette, handlePaletteSave, handleRewrite, handleUndo } from "./core.mjs";
+import { configFor, handleApplied, handleApply, handleInspiration, handleDesign, handleDesignSave, handleEdits, handlePalette, handlePaletteSave, handleRewrite, handleUndo } from "./core.mjs";
 
 const ENDPOINT = "/__page-editor";
 
@@ -117,6 +117,7 @@ createServer(async (req, res) => {
     if (path === `${ENDPOINT}/apply`) return handleApply(cfg, req, res);
     if (path === `${ENDPOINT}/undo`) return handleUndo(cfg, req, res);
     if (path === `${ENDPOINT}/applied`) return handleApplied(cfg, req, res);
+    if (path === `${ENDPOINT}/inspiration`) return handleInspiration(cfg, req, res);
   }
   if (path === "/editor.js") {
     try {

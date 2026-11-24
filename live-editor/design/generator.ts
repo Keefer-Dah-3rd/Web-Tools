@@ -39,7 +39,8 @@ interface Target {
   /** The selector the CSS is scoped to. */
   selector: string;
   /** "all": every element of this kind (by its class); "one": just the picked element. */
-  scope: "all" | "one";
+  /** "app": the whole app (the selector is :root; variations restyle shared tokens and common parts). */
+  scope: "all" | "one" | "app";
   count: number;
   label: string;
   source?: string;
@@ -64,6 +65,9 @@ const STYLE = `
   color: #e9edf3; font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   background: rgba(22, 25, 31, 0.95); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
   border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.4); }
+/* Docked (a dock opens it): the left-hand slot every tool shares, fixed in place. */
+:host([data-docked]) .panel { left: 8px; top: 36px; max-height: calc(100vh - 84px); }
+:host([data-docked]) .head { cursor: default; }
 .head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; cursor: grab; user-select: none; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
 .head b { flex: 1; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
 .head .dot { color: #b48cff; font-size: 14px; }
@@ -96,6 +100,16 @@ textarea, input[type=text] { font: 500 12px/1.35 inherit; font-family: inherit; 
 .card details summary { cursor: pointer; color: #8e9aab; font-size: 10.5px; }
 .card pre { margin: 4px 0 0; max-height: 160px; overflow: auto; font: 500 10.5px/1.35 ui-monospace, Menlo, monospace; color: #cfd8e3; background: rgba(0,0,0,.3); padding: 6px; border-radius: 6px; white-space: pre-wrap; }
 .note { color: #8e9aab; font-size: 11px; margin: 0; }
+.drop { border-radius: 10px; transition: background .15s, outline-color .15s; outline: 2px dashed transparent; outline-offset: 4px; }
+.drop.over { outline-color: #b48cff; background: rgba(180,140,255,.08); }
+.inspo { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.inspo:empty { display: none; }
+.inspo figure { position: relative; margin: 0; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.16); background: #000; }
+.inspo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.inspo button { position: absolute; top: 3px; right: 3px; padding: 0 5px; font-size: 10px; line-height: 16px; border-radius: 999px; background: rgba(0,0,0,.7); border-color: rgba(255,255,255,.3); }
+.inspo figure.busy { opacity: .45; }
+label.add { font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); padding: 6px 9px; white-space: nowrap; }
+label.add:hover { background: rgba(255, 255, 255, 0.13); }
 .head, .status, .foot, .applied { flex: none; }
 .status { min-height: 16px; color: #d9c7ff; font-size: 11px; padding: 0 12px 8px; }
 .status.err { color: #ff9a8a; }
@@ -122,6 +136,7 @@ const HTML = `
       <div class="target" data-out="target"></div>
       <div class="row" style="margin-top:6px">
         <button data-act="pick">◎ Pick a part</button>
+        <button data-act="whole-app" title="Design the whole app, not one part">▣ Whole app</button>
         <button data-act="parent" title="The part around it (↑ while picking)">↑ Bigger</button>
         <button data-act="child" title="A part inside it (↓ while picking)">↓ Smaller</button>
       </div>
@@ -132,6 +147,14 @@ const HTML = `
       <textarea data-in="ask" rows="3" placeholder="e.g. make these feel like physical keys, less glow, more like the OP-1's screen"></textarea>
       <div class="chips" data-out="asks" style="margin-top:6px"></div>
       <div class="row" style="margin-top:8px"><button class="primary" data-act="make">✦ Make 3 variations</button><button data-act="more" title="Three more, different from these">More</button></div>
+    </section>
+    <section class="drop" data-out="drop">
+      <h4>Inspiration <span data-out="inspo-count"></span></h4>
+      <div class="inspo" data-out="inspo"></div>
+      <div class="row" style="margin-top:6px">
+        <label class="add">＋ Add images<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden data-in="files"></label>
+        <span class="note">or drop or paste (⌘V) them here. Claude looks at them when it designs.</span>
+      </div>
     </section>
     <section>
       <h4>Variations <span data-out="showing"></span></h4>
@@ -224,6 +247,10 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   let variants: Variant[] = last.variants ?? [];
   let on = last.on ?? -1;
   let kept: Kept[] = load<Kept[]>(keptKey, []);
+  /** Inspiration images: the helper keeps the image (id), the panel a small thumbnail. */
+  const inspoKey = `${storagePrefix}:design:inspiration`;
+  let inspiration: { id: string; thumb: string }[] = load<{ id: string; thumb: string }[]>(inspoKey, []);
+  let uploading = 0;
   let picking = false;
   let hovered: Element | null = null;
   let original = false;
@@ -231,7 +258,46 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   const writer = new CodeWriter(endpoint, storagePrefix, "design");
   askBox.value = last.ask ?? "";
 
-  const remember = () => store(lastKey, { target, ask: askBox.value, variants, on });
+  // ---- undo / redo: picking a part, its scope, the variations and which one is on
+  type Snapshot = { target: Target | null; variants: Variant[]; on: number };
+  let past: string[] = [];
+  let future: string[] = [];
+  const snapshot = () => JSON.stringify({ target, variants, on } satisfies Snapshot);
+  const remember = () => {
+    store(lastKey, { target, ask: askBox.value, variants, on });
+    const snap = snapshot();
+    if (snap === past[past.length - 1]) return;
+    past.push(snap);
+    if (past.length > 60) past.shift();
+    future = [];
+  };
+  const restore = (snap: string) => {
+    const s: Snapshot = JSON.parse(snap);
+    target = s.target;
+    variants = s.variants;
+    on = s.on;
+    element = !target ? null : target.scope === "app" ? document.documentElement : document.querySelector(target.selector);
+    store(lastKey, { target, ask: askBox.value, variants, on });
+    applyVariant();
+    render();
+  };
+  const undo = () => {
+    if (past.length < 2) return say("Nothing to undo.");
+    future.push(past.pop()!);
+    restore(past[past.length - 1]);
+    say("Undone.");
+  };
+  const redo = () => {
+    const next = future.pop();
+    if (!next) return say("Nothing to redo.");
+    past.push(next);
+    restore(next);
+    say("Redone.");
+  };
+  window.addEventListener("review-tool:history", (e) => {
+    const { target: who, redo: again } = (e as CustomEvent<{ target: string; redo: boolean }>).detail;
+    if (who === host.id) (again ? redo : undo)();
+  });
   const say = (text: string, err = false) => {
     const el = out("status");
     // Long answers (Claude's summaries) stay short here; the whole text is on hover.
@@ -325,6 +391,21 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     (box.firstElementChild as HTMLElement).textContent = label ?? "";
   };
 
+  const WHOLE_APP: Target = { selector: ":root", scope: "app", count: 1, label: "the whole app", canvas: false };
+  function chooseWholeApp() {
+    stopPicking();
+    if (target?.scope !== "app" && variants.length) {
+      variants = [];
+      on = -1;
+    }
+    element = document.documentElement;
+    target = WHOLE_APP;
+    applyVariant();
+    remember();
+    render();
+    say("The whole app. Say what to try: variations restyle the shared tokens and the most-used parts.");
+  }
+
   function choose(el: Element | null) {
     if (!el) return;
     const scope = target?.scope === "one" ? "one" : "all";
@@ -413,7 +494,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   );
   const follow = () => {
     if (!element?.isConnected && target) element = document.querySelector(target.selector);
-    place(pickBox, panel.hidden || picking ? null : element, target?.label);
+    place(pickBox, panel.hidden || picking || target?.scope === "app" ? null : element, target?.label);
   };
   window.addEventListener("scroll", follow, { passive: true, capture: true });
   window.addEventListener("resize", follow);
@@ -430,7 +511,35 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   function rulesFor(el: Element): string {
     const classes = new Set<string>();
     for (const node of [el, ...el.querySelectorAll("*")].slice(0, 120)) for (const c of node.classList) classes.add(c);
-    const wanted = [...classes].filter((c) => c.length > 2).map((c) => `.${c}`);
+    return rulesForClasses([...classes]);
+  }
+
+  /** The most-used kinds of part on screen (by class), each with how many and how the first one looks. */
+  function inventory(): { classes: string[]; text: string } {
+    const counts = new Map<string, { n: number; first: Element }>();
+    for (const el of document.body.querySelectorAll("*")) {
+      if (el.closest(TOOL)) continue;
+      const cls = kindClass(el);
+      if (!cls || cls.length < 3) continue;
+      const c = counts.get(cls);
+      if (c) c.n++;
+      else counts.set(cls, { n: 1, first: el });
+    }
+    const top = [...counts.entries()]
+      .filter(([, c]) => c.first.getBoundingClientRect().width > 0)
+      .sort((a, b) => b[1].n - a[1].n)
+      .slice(0, 40);
+    const text = top
+      .map(([cls, c]) => {
+        const words = (c.first.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 30);
+        return `- ${c.first.tagName.toLowerCase()}.${cls} ×${c.n}${words ? ` “${words}”` : ""}: ${computedOf(c.first).slice(0, 360)}`;
+      })
+      .join("\n");
+    return { classes: top.map(([cls]) => cls), text };
+  }
+
+  function rulesForClasses(classList: string[]): string {
+    const wanted = classList.filter((c) => c.length > 2).map((c) => `.${c}`);
     const found: string[] = [];
     let room = 14000;
     const walk = (rules: CSSRuleList, wrap: (css: string) => string) => {
@@ -495,7 +604,12 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
 
   function applyVariant() {
     const v = on >= 0 ? variants[on] : null;
-    sheet().textContent = v && target && !original ? scoped(target.selector, v.css) : "";
+    const next = v && target && !original ? scoped(target.selector, v.css) : "";
+    if (sheet().textContent !== next) {
+      sheet().textContent = next;
+      // A variation may change colour tokens: canvases that resolved theirs once redraw.
+      window.dispatchEvent(new Event("palettechange"));
+    }
     $<HTMLButtonElement>("[data-act=original]").classList.toggle("on", original);
   }
 
@@ -517,12 +631,20 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
         body: JSON.stringify({
           ask,
           target: { selector: target.selector, scope: target.scope, count: target.count, label: target.label, source: target.source, canvas: target.canvas },
-          markup: markupOf(element),
-          computed: computedOf(element),
-          children: [...element.children].slice(0, 6).map((c) => `${c.tagName.toLowerCase()}${kindClass(c) ? `.${kindClass(c)}` : ""}: ${computedOf(c)}`),
-          rules: rulesFor(element),
+          ...(target.scope === "app"
+            ? (() => {
+                const inv = inventory();
+                return { inventory: inv.text, computed: computedOf(document.body), rules: rulesForClasses(inv.classes) };
+              })()
+            : {
+                markup: markupOf(element),
+                computed: computedOf(element),
+                children: [...element.children].slice(0, 6).map((c) => `${c.tagName.toLowerCase()}${kindClass(c) ? `.${kindClass(c)}` : ""}: ${computedOf(c)}`),
+                rules: rulesFor(element),
+              }),
           tokens: tokensNow(),
           avoid: more ? variants.map((v) => `${v.name}: ${v.why}`) : [],
+          inspiration: inspiration.map((i) => i.id),
           viewport: { width: innerWidth, height: innerHeight },
         }),
       });
@@ -566,8 +688,9 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
           note: "A design variation from the Design Generator, tried live. css is nested CSS where & is the part; it was applied as `<target.selector> { css }` on top of the app's styles. Write it into the component's own stylesheet (and only with the app's tokens), replacing what it overrides, not as an extra layer.",
           ask: askBox.value.trim(),
           why: v.why,
-          target: { ...target, markup: markupOf(element) },
+          target: { ...target, markup: target.scope === "app" ? "" : markupOf(element) },
           css: cleanCss(v.css),
+          inspiration: inspiration.map((i) => i.id),
         }),
       });
       const data = (await res.json()) as { file?: string; name?: string; canApply?: boolean; error?: string };
@@ -619,9 +742,14 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
         target.canvas ? `<small class="warn">Drawn on a canvas: CSS can change its frame, not what's drawn inside.</small>` : ""
       }${element && !element.isConnected ? `<small class="warn">Not on screen right now.</small>` : ""}`;
     }
-    out("scope-count").textContent = target ? `${target.count} on screen` : "";
+    const whole = target?.scope === "app";
+    if (whole) t.innerHTML = `<code>▣ the whole app</code><small>Variations restyle the shared tokens (corners, shadows, surfaces, type) and the most-used parts, everywhere at once.</small>`;
+    $<HTMLButtonElement>("[data-act=whole-app]").classList.toggle("on", whole);
+    $<HTMLButtonElement>("[data-act=parent]").disabled = whole || !target;
+    $<HTMLButtonElement>("[data-act=child]").disabled = whole || !target;
+    out("scope-count").textContent = target && !whole ? `${target.count} on screen` : "";
     const canAll = element ? !!kindClass(element) : false;
-    out("scopes").innerHTML = target
+    out("scopes").innerHTML = target && !whole
       ? `<button data-scope="all" class="${target.scope === "all" ? "on" : ""}" ${canAll ? "" : "disabled"}>Every one like it</button><button data-scope="one" class="${target.scope === "one" ? "on" : ""}">Just this one</button>`
       : "";
     $<HTMLButtonElement>("[data-act=pick]").classList.toggle("on", picking);
@@ -644,6 +772,10 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       )
       .join("");
     out("kept-count").textContent = kept.length ? String(kept.length) : "";
+    out("inspo-count").textContent = inspiration.length || uploading ? `${inspiration.length + uploading} of 4` : "";
+    out("inspo").innerHTML =
+      inspiration.map((im, i) => `<figure><img src="${im.thumb}" alt="Inspiration ${i + 1}"><button data-unspire="${i}" title="Remove">✕</button></figure>`).join("") +
+      Array.from({ length: uploading }, () => `<figure class="busy"></figure>`).join("");
     out("applied").innerHTML = appliedRow(writer.last, esc);
     follow();
   }
@@ -657,6 +789,13 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     const vi = t.closest<HTMLElement>("[data-variant]")?.dataset.variant;
     const drop = t.closest<HTMLElement>("[data-drop]")?.dataset.drop;
     const ki = t.closest<HTMLElement>("[data-kept]")?.dataset.kept;
+    const unspire = t.closest<HTMLElement>("[data-unspire]")?.dataset.unspire;
+    if (unspire != null) {
+      inspiration.splice(Number(unspire), 1);
+      store(inspoKey, inspiration);
+      render();
+      return;
+    }
     if (drop != null) {
       kept.splice(Number(drop), 1);
       store(keptKey, kept);
@@ -692,7 +831,8 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       if (picking) say("Click any part of the app. ↑ ↓ change the size; Esc stops.");
       else stopPicking();
       render();
-    } else if (act === "parent" && element?.parentElement && element.parentElement !== document.body) choose(element.parentElement);
+    } else if (act === "whole-app") chooseWholeApp();
+    else if (act === "parent" && element?.parentElement && element.parentElement !== document.body) choose(element.parentElement);
     else if (act === "child" && element?.firstElementChild) choose(element.firstElementChild);
     else if (act === "make") void make(false);
     else if (act === "more") void make(true);
@@ -715,11 +855,96 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   });
 
   askBox.addEventListener("input", remember);
+
+  // ---- inspiration images: add by file picker, drop or paste
+
+  /** An image file → a data URL no bigger than `edge` px on its long side (JPEG for photos, PNG otherwise). */
+  const shrink = (file: File, edge: number): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, edge / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.naturalWidth * k));
+        c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL(file.type === "image/png" || file.type === "image/gif" ? "image/png" : "image/jpeg", 0.88));
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error(`Couldn't read ${file.name || "that image"}.`));
+      };
+      img.src = url;
+    });
+
+  async function addImages(files: File[]) {
+    const room = 4 - inspiration.length - uploading;
+    const images = files.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
+    if (!images.length) return say("Add PNG, JPEG, WebP or GIF images.", true);
+    if (room <= 0) return say("Four images at most: remove one first.", true);
+    const take = images.slice(0, room);
+    uploading += take.length;
+    render();
+    for (const file of take) {
+      try {
+        const [full, thumb] = await Promise.all([shrink(file, 1600), shrink(file, 160)]);
+        const res = await fetch(`${endpoint}/inspiration`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dataUrl: full }) });
+        const data = (await res.json()) as { id?: string; error?: string };
+        if (!res.ok || !data.id) throw new Error(data.error ?? `The helper answered ${res.status}.`);
+        if (!inspiration.some((i) => i.id === data.id)) inspiration.push({ id: data.id, thumb });
+        store(inspoKey, inspiration);
+      } catch (e) {
+        say(`Couldn't add that image: ${(e as Error).message}`, true);
+      } finally {
+        uploading--;
+        render();
+      }
+    }
+    if (images.length > take.length) say("Four images at most: the rest weren't added.", true);
+    else say(`${inspiration.length} inspiration image${inspiration.length === 1 ? "" : "s"}. Claude looks at them on the next Make.`);
+  }
+
+  $<HTMLInputElement>("[data-in=files]").addEventListener("change", (e) => {
+    const input = e.target as HTMLInputElement;
+    void addImages([...(input.files ?? [])]);
+    input.value = "";
+  });
+  const dropZone = out("drop");
+  panel.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault();
+    dropZone.classList.add("over");
+  });
+  panel.addEventListener("dragleave", (e) => {
+    if (!panel.contains(e.relatedTarget as Node)) dropZone.classList.remove("over");
+  });
+  panel.addEventListener("drop", (e) => {
+    dropZone.classList.remove("over");
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    void addImages([...e.dataTransfer.files]);
+  });
+  // ⌘V an image while the panel is open (not into one of the app's own fields).
+  document.addEventListener(
+    "paste",
+    (e) => {
+      if (panel.hidden) return;
+      const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()!).filter(Boolean);
+      if (!files.length) return;
+      const inApp = e.composedPath().some((n) => (n instanceof HTMLInputElement || n instanceof HTMLTextAreaElement || (n instanceof HTMLElement && n.isContentEditable)) && !ours(n));
+      if (inApp) return;
+      e.preventDefault();
+      void addImages(files);
+    },
+    true,
+  );
   root.addEventListener("keydown", (e) => e.stopPropagation());
 
   const head = $(".head");
   head.addEventListener("pointerdown", (e) => {
-    if ((e.target as HTMLElement).closest("button")) return;
+    if ((e.target as HTMLElement).closest("button") || host.hasAttribute("data-docked")) return;
     const start = { x: e.clientX, y: e.clientY, left: panel.offsetLeft, top: panel.offsetTop };
     head.setPointerCapture(e.pointerId);
     const move = (m: PointerEvent) => {
@@ -735,6 +960,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   });
 
   setOpen(load(openKey, false));
+  past = [snapshot()];
   applyVariant();
   render();
   // An apply that was still running when the page reloaded: pick up how it went.
