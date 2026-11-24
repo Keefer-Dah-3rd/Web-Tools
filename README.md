@@ -181,6 +181,11 @@ editor's helper instead of the Vite plugin:
 npm run mibbit
 ```
 
+Or skip the steps: **Mibbit Tools** (in `~/Applications`, built by `launcher/make-app.sh`) starts
+Docker and Mibbit if they're off, starts this helper if it isn't running, and opens
+<http://localhost:5173/?tools> in Chrome. Keep it in the Dock; clicking it again just opens Chrome.
+Its logs are in `~/Library/Logs/mibbit-tools/`; the helper it starts runs until you log out.
+
 Then open <http://localhost:5173/?tools>. A small dock sits in the bottom-left corner: **✎ Edit**
 (⌥E, the toolbar), **◐ Colour** (⌥C, Colour Lab), **✦ Design** (⌥D, Design Generator); its dot (⌥H)
 hides every tool for a clean look at the app, with your changes still on. If the helper isn't
