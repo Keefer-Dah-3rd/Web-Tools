@@ -78,7 +78,8 @@ project's colours; `presets/keefedesign-brief.md` is the Coco case study's brief
 ### Using the toolbar
 
 - **Select** (or `E`), then click anything. `↑` `↓` step out and in. `Delete` removes.
-- **Style**: text size, type style, colour (text or fill), shrink / grow.
+- **Style**: text size, type style, colour (text or fill), shrink / grow. Hover a colour swatch to
+  see it on the selected element; move off to put it back, click to keep it.
 - **Edit text**: double-click words (or `T`) and type. `Enter` keeps it, `⇧Enter` adds a line
   break, `Esc` cancels, **Original text** puts it back.
 - **Rewrite with AI** (the orange box). Open **Mood** to describe the mood and/or tap quick

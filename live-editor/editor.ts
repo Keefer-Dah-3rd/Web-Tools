@@ -405,6 +405,10 @@ export function mountEditor(options: EditorOptions | string): void {
   sheet.id = "live-editor-rules";
   // Inside a shadow root, page rules only reach its elements from a sheet of its own.
   (shadow ?? document.head).appendChild(sheet);
+  /** Hover preview: a swatch under the pointer shows on the picked element (after the edits, so it wins). */
+  const peekSheet = document.createElement("style");
+  peekSheet.id = "live-editor-peek";
+  (shadow ?? document.head).appendChild(peekSheet);
 
   const $ = <T extends HTMLElement>(q: string) => root.querySelector(q) as T;
   const bar = $(".bar");
@@ -1131,7 +1135,26 @@ export function mountEditor(options: EditorOptions | string): void {
 
   const setSize = (px: number) => change((e) => (e.fontSize = Math.max(6, Math.round(px * 2) / 2)));
   const setScale = (scale: number) => change((e) => (e.scale = Math.min(2.5, Math.max(0.3, Math.round(scale * 100) / 100))));
-  const setColour = (hex: string) => change((e) => (target === "color" ? (e.color = hex) : (e.fill = hex)));
+  const setColour = (hex: string) => {
+    peekSheet.textContent = "";
+    change((e) => (target === "color" ? (e.color = hex) : (e.fill = hex)));
+  };
+  // Hover a swatch: the picked element wears it until the pointer moves off the swatches; a click keeps it.
+  let peekOff = 0;
+  root.addEventListener("pointerover", (event) => {
+    const swatch = (event.target as HTMLElement).closest<HTMLElement>("[data-colour]");
+    window.clearTimeout(peekOff);
+    if (!swatch) {
+      if (peekSheet.textContent) peekOff = window.setTimeout(() => (peekSheet.textContent = ""), 80);
+      return;
+    }
+    if (!picked || editing) return;
+    peekSheet.textContent = `${selectorOf(picked)} { ${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important; }`;
+  });
+  bar.addEventListener("pointerleave", () => {
+    window.clearTimeout(peekOff);
+    peekSheet.textContent = "";
+  });
   const remove = () => {
     if (!picked) return;
     const parent = picked.parentElement;
