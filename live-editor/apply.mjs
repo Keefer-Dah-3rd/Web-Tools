@@ -135,47 +135,120 @@ const within = (file, globs) => globs.some((g) => (g.endsWith("/**") ? file.star
 
 // ---- palette: deterministic
 
+const WHEEL_NAMES = ["orange", "amber", "yellow", "chartreuse", "green", "emerald", "cyan", "azure", "blue", "indigo", "violet", "purple", "magenta", "pink", "red", "crimson"];
+/** The wheel's name for a hue (the names sit 22.5° apart from orange at 45°). */
+const hueName = (h) => WHEEL_NAMES[Math.round((((h - 45) % 360) + 360) % 360 / 22.5) % 16];
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 async function applyPalette(cfg, save, untrackedBefore) {
   const a = cfg.apply;
-  const tokensPath = join(a.repo, a.tokens);
-  const before = readFileSync(tokensPath, "utf8");
-  let css = before;
-  let count = 0;
-  const expected = Object.values(save.scales ?? {}).reduce((n, steps) => n + Object.keys(steps).length, 0);
-  for (const [prefix, steps] of Object.entries(save.scales ?? {})) {
-    if (!/^--[a-z][\w-]*$/.test(prefix)) throw new Error(`Odd scale name ${prefix}.`);
-    for (const [step, hex] of Object.entries(steps)) {
-      if (!/^#[0-9A-Fa-f]{6}$/.test(hex) || !/^\d+$/.test(step)) throw new Error(`Odd value ${prefix}-${step}: ${hex}.`);
-      const re = new RegExp(`(^\\s*${prefix}-${step}\\s*:\\s*)#[0-9A-Fa-f]{6}(\\s*;)`, "m");
-      if (re.test(css)) {
-        css = css.replace(re, `$1${hex.toUpperCase()}$2`);
-        count++;
+  const { lchToHex } = await import("./colour/palette.ts");
+  // Every file this apply writes, with what it held before, so any failure puts all of them back.
+  const before = new Map();
+  const edit = (rel, change) => {
+    const path = join(a.repo, rel);
+    const text = before.has(rel) ? readFileSync(path, "utf8") : readFileSync(path, "utf8");
+    if (!before.has(rel)) before.set(rel, text);
+    writeFileSync(path, change(text));
+  };
+  const restore = () => {
+    for (const [rel, text] of before) writeFileSync(join(a.repo, rel), text);
+  };
+
+  try {
+    let count = 0;
+    const expected = Object.values(save.scales ?? {}).reduce((n, steps) => n + Object.keys(steps).length, 0);
+    edit(a.tokens, (css) => {
+      for (const [prefix, steps] of Object.entries(save.scales ?? {})) {
+        if (!/^--[a-z][\w-]*$/.test(prefix)) throw new Error(`Odd scale name ${prefix}.`);
+        for (const [step, hex] of Object.entries(steps)) {
+          if (!/^#[0-9A-Fa-f]{6}$/.test(hex) || !/^\d+$/.test(step)) throw new Error(`Odd value ${prefix}-${step}: ${hex}.`);
+          const re = new RegExp(`(^\\s*${esc(prefix)}-${step}\\s*:\\s*)#[0-9A-Fa-f]{6}(\\s*;)`, "m");
+          if (re.test(css)) {
+            css = css.replace(re, `$1${hex.toUpperCase()}$2`);
+            count++;
+          }
+        }
+      }
+      if (count !== expected) throw new Error(`Found ${count} of ${expected} scale steps in ${a.tokens}; nothing changed.`);
+      // Single colour tokens (the accents): the value changes, any comment after it stays.
+      for (const [token, hex] of Object.entries(save.roles ?? {})) {
+        if (!/^--[a-z][\w-]*$/.test(token) || !/^#[0-9A-Fa-f]{6}$/.test(hex)) throw new Error(`Odd colour ${token}: ${hex}.`);
+        const re = new RegExp(`(^\\s*${esc(token)}\\s*:\\s*)[^;]+;`, "m");
+        if (!re.test(css)) throw new Error(`${token} isn't in ${a.tokens}; nothing changed.`);
+        css = css.replace(re, `$1${hex.toLowerCase()};`);
+      }
+      // The track wheel: slot 0 stays a hex literal, the rest OKLCH, and each comment names its new hue.
+      const lch = save.tracks?.lch;
+      if (lch) {
+        if (!Array.isArray(lch) || lch.length !== save.tracks.tokens.length) throw new Error("The track colours don't add up; nothing changed.");
+        lch.forEach(([L, C, H], i) => {
+          const token = save.tracks.tokens[i];
+          const value = i === 0 ? lchToHex({ L, C, H }).toLowerCase() : `oklch(${L.toFixed(2)} ${C.toFixed(2)} ${H})`;
+          const re = new RegExp(`(^\\s*${esc(token)}:\\s*)[^;]+;(\\s*)\\/\\*[^*]*\\*\\/`, "m");
+          if (!re.test(css)) throw new Error(`${token} isn't in ${a.tokens} as expected; nothing changed.`);
+          css = css.replace(re, `$1${value};$2/* ${hueName(H)}${i === 0 ? " (the wheel's start)" : ""} */`);
+        });
+      }
+      // The brand's anchor colour is named in the file's comments too: keep them true.
+      const oldAnchor = save.was?.["--brand"]?.["800"];
+      const newAnchor = save.scales?.["--brand"]?.["800"];
+      if (oldAnchor && newAnchor) css = css.replaceAll(oldAnchor.toUpperCase(), newAnchor.toUpperCase());
+      return css;
+    });
+
+    // The JS mirror of the track wheel and the test that pins slot 0's literal.
+    if (save.tracks?.lch && a.tracks) {
+      const lch = save.tracks.lch;
+      edit(a.tracks.mirror, (js) => {
+        lch.forEach(([L, C, H], i) => {
+          const re = new RegExp(`^(\\s*)\\[[\\d.]+, [\\d.]+, \\d+\\],(\\s*)\\/\\/ ${i}\\b.*$`, "m");
+          if (!re.test(js)) throw new Error(`Couldn't find track colour ${i} in ${a.tracks.mirror}; nothing changed.`);
+          js = js.replace(re, `$1[${L.toFixed(2)}, ${C.toFixed(2)}, ${H}],$2// ${String(i).padEnd(2)} ${hueName(H)}${i === 0 ? " (the wheel's start)" : ""}`);
+        });
+        return js;
+      });
+      if (a.tracks.test) {
+        const slot0 = lchToHex({ L: lch[0][0], C: lch[0][1], H: lch[0][2] }).toLowerCase();
+        edit(a.tracks.test, (t) => t.replace(/(--pad-color-0:\\s\*)#[0-9a-f]{6}/, `$1${slot0}`));
       }
     }
-  }
-  if (count !== expected) throw new Error(`Found ${count} of ${expected} scale steps in ${a.tokens}; nothing changed.`);
-  // The brand's anchor colour is named in the file's comments too: keep them true.
-  const oldAnchor = save.was?.["--brand"]?.["800"];
-  const newAnchor = save.scales?.["--brand"]?.["800"];
-  if (oldAnchor && newAnchor) css = css.replaceAll(oldAnchor.toUpperCase(), newAnchor.toUpperCase());
-  writeFileSync(tokensPath, css);
 
-  const files = [a.tokens];
-  if (a.contrastScript) {
-    const res = await run("python3", [a.contrastScript], a.repo);
-    if (res.code !== 0) {
-      writeFileSync(tokensPath, before);
-      const fails = res.stdout.split("\n").filter((l) => /fail|✗|below/i.test(l)).slice(0, 6).join("\n");
-      throw new Error(`The palette fails the app's contrast check, so it wasn't applied.${fails ? `\n${fails}` : ""}`);
+    if (a.contrastScript) {
+      const res = await run("python3", [a.contrastScript], a.repo);
+      if (res.code !== 0) {
+        const fails = res.stdout.split("\n").filter((l) => /fail|✗|below/i.test(l)).slice(0, 6).join("\n");
+        throw new Error(`The palette fails the app's contrast check, so it wasn't applied.${fails ? `\n${fails}` : ""}`);
+      }
+      if (a.contrastDoc) {
+        before.set(a.contrastDoc, readFileSync(join(a.repo, a.contrastDoc), "utf8"));
+        writeFileSync(join(a.repo, a.contrastDoc), res.stdout);
+      }
     }
-    if (a.contrastDoc) {
-      writeFileSync(join(a.repo, a.contrastDoc), res.stdout);
-      files.push(a.contrastDoc);
+    if (save.tracks?.lch && a.tracks?.check) {
+      const [cmd, ...args] = a.tracks.check;
+      const res = await run(cmd, args, join(a.repo, a.tracks.checkIn ?? "."), 300_000);
+      if (res.code !== 0) {
+        const plain = (res.stdout + res.stderr).replace(/\u001b\[[0-9;]*m/g, "");
+        const failing = plain.split("\n").filter((l) => /✗|×|FAIL|AssertionError|expected/i.test(l)).slice(0, 4).join("\n");
+        throw new Error(`The track colours broke their test, so the palette wasn't applied.${failing ? `\n${failing}` : ""}`);
+      }
     }
+
+    const files = [...before.keys()];
+    const changed = await changedFiles(cfg, untrackedBefore);
+    const what = [
+      Object.keys(save.scales ?? {}).length && `${Object.keys(save.scales).length} scale(s)`,
+      Object.keys(save.roles ?? {}).length && `${Object.keys(save.roles).length} accent colour(s)`,
+      save.tracks?.lch && "the track colours",
+    ].filter(Boolean);
+    const anchor = save.scales?.["--brand"]?.["800"];
+    const sha = await commit(cfg, changed.filter((f) => files.includes(f)), `${save.tracks?.lch || save.roles && Object.keys(save.roles).length ? "Theme" : "Palette"}: ${save.name} (brand ${anchor ?? "unchanged"})`);
+    return { commit: sha, files, summary: `Wrote ${what.join(", ")} into the app${a.contrastDoc ? " and refreshed the contrast table" : ""}.` };
+  } catch (e) {
+    restore();
+    throw e;
   }
-  const changed = await changedFiles(cfg, untrackedBefore);
-  const sha = await commit(cfg, changed.filter((f) => files.includes(f)), `Palette: ${save.name} (brand ${newAnchor ?? "unchanged"})`);
-  return { commit: sha, files, summary: `Wrote ${count} colour steps into ${a.tokens}${a.contrastDoc ? " and refreshed the contrast table" : ""}.` };
 }
 
 // ---- design and page edits: Claude Code
@@ -259,7 +332,14 @@ export async function applySave(cfg, kind, name) {
     if (why) throw new Error(why);
     const save = JSON.parse(readFileSync(file, "utf8"));
     const untrackedBefore = await untrackedNow(cfg);
-    const result = kind === "palette" ? await applyPalette(cfg, save, untrackedBefore) : await applyWithClaude(cfg, kind, save, untrackedBefore);
+    let result;
+    try {
+      result = kind === "palette" ? await applyPalette(cfg, save, untrackedBefore) : await applyWithClaude(cfg, kind, save, untrackedBefore);
+    } catch (e) {
+      // Logged too: the app's dev server may have reloaded the page before this answer arrives.
+      writeLog(cfg, { kind, save: name, name: save.name ?? save.page, failed: String(e?.message ?? e).slice(0, 600), at: new Date().toISOString() });
+      throw e;
+    }
     writeLog(cfg, { kind, save: name, name: save.name ?? save.page, commit: result.commit, files: result.files, summary: result.summary, at: new Date().toISOString() });
     if (kind === "page" && save.page && save.savedAt) writeFileSync(join(cfg.editsDir, `${save.page}.applied.json`), `${JSON.stringify({ savedAt: save.savedAt, commit: result.commit })}\n`);
     return result;

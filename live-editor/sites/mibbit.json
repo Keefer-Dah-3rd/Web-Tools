@@ -27,6 +27,17 @@
       "."
     ],
     "typecheckIn": "web",
-    "autoPage": true
+    "autoPage": true,
+    "tracks": {
+      "mirror": "web/src/engine/padColors.ts",
+      "test": "web/src/engine/__tests__/padColors.test.ts",
+      "check": [
+        "npx",
+        "vitest",
+        "run",
+        "src/engine/__tests__/padColors.test.ts"
+      ],
+      "checkIn": "web"
+    }
   }
 }

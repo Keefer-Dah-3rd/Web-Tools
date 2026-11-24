@@ -23,6 +23,25 @@ brand's hue (casingFollow true) and its tint can be scaled from 0 (pure grey) to
 the colour it has now; 1 = as designed). Keep tints between 0.4 and 1.8 unless the mood clearly
 asks for grey or for colour.
 
+A palette is a **theme for the whole page** unless the mood asks only for the brand:
+
+- **displays** (true/false) and **displayTint** (0–3, 1 = as designed): the scope glass, LCD and
+  OLED screens, cool grey today. On, they take the harmony's second hue (or turn with the brand
+  when the harmony is "keep"); the tint sets how coloured the glass gets. 0.8–1.8 reads as tinted
+  glass; above 2 starts to look like a colour, not a screen.
+- **accents** (true/false): the fixed hardware accents (scope cyan, spectrum green, the LCD's
+  amber and lime phosphor, gold knob arcs, the Nibbit character) move to the theme's hues and keep
+  their brightness.
+- **tracks** (true/false): the 16 track colours, one even colour wheel, turned as a whole so the
+  first track takes the theme's lead and every track stays distinct from the others.
+- **vividness** (0.3–1.5, 1 = as designed): how colourful accents and tracks are. 0.5–0.8 is
+  muted, vintage hardware; 1.2–1.5 is neon. Text and contrast are checked after, so don't push
+  vividness to fix legibility.
+
+For a mood that is about the whole app ("late-night studio", "vintage hardware", "calmer"),
+turn displays, accents and tracks on and use the tints and vividness to carry the mood. For a
+mood that is only about the brand colour, leave them off.
+
 The **harmony** picks two supporting scales (none used by the UI yet, but they set the mood of
 future accents): "complementary", "split", "analogous", "triad", "mono", or "keep" to leave them.
 
@@ -38,7 +57,7 @@ future accents): "complementary", "split", "analogous", "triad", "mono", or "kee
 
 ## The options
 
-Give exactly three palettes, genuinely different from each other and from the current seed and
+Give exactly three palettes (themes), genuinely different from each other and from the current seed and
 any already-kept seeds listed. Each gets a short name a designer would say out loud (one to three
 words, no puns), and one plain sentence on what it does to the app, under 20 words. No hype words.
 

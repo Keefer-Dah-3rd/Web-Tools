@@ -71,8 +71,31 @@ export const MIBBIT_PALETTE: PaletteSite = {
     { prefix: "--complement", label: "Second", hint: "not used by a role yet", anchor: 8 },
     { prefix: "--analogous", label: "Third", hint: "not used by a role yet", anchor: 8 },
   ],
+  // Scope glass, LCD and OLED (cool grey). --display-bg is cool-950; the hue reads best at 800.
+  displays: { prefix: "--cool", label: "Displays", hint: "scope glass, LCD, OLED", anchor: 8 },
+  // The fixed OP-1 accents and the Nibbit character: they keep their brightness and move with the theme.
+  accents: [
+    { token: "--color-blue", label: "scope cyan", follows: "second" },
+    { token: "--color-green", label: "spectrum green", follows: "third" },
+    { token: "--color-white", label: "playhead white", follows: "brand" },
+    { token: "--color-lcd-on", label: "LCD lime", follows: "brand" },
+    { token: "--lcd-lit", label: "phosphor amber", follows: "brand" },
+    { token: "--lcd-lit-hi", label: "phosphor highlight", follows: "brand" },
+    { token: "--lcd-lit-pale", label: "phosphor pale", follows: "brand" },
+    { token: "--color-gold-soft", label: "gold", follows: "brand" },
+    { token: "--nibbit-body", label: "Nibbit body", follows: "second" },
+    { token: "--nibbit-body-lo", label: "Nibbit shade", follows: "second" },
+    { token: "--nibbit-lens", label: "Nibbit lens", follows: "second" },
+    { token: "--nibbit-outline", label: "Nibbit outline", follows: "second" },
+    { token: "--nibbit-mouth", label: "Nibbit mouth", follows: "second" },
+    { token: "--nibbit-led-off", label: "Nibbit LED off", follows: "third" },
+    { token: "--mascot-face", label: "mascot face", follows: "brand" },
+    { token: "--mascot-crown", label: "mascot crown", follows: "brand" },
+    { token: "--mascot-glint", label: "mascot glint", follows: "second" },
+  ],
+  // The 16 track colours (web/src/engine/padColors.ts mirrors them): turned as one wheel.
+  tracks: { tokens: Array.from({ length: 16 }, (_, i) => `--pad-color-${i}`) },
   locked: [
-    { prefix: "--cool", label: "displays (cool grey)", anchor: 8 },
     { prefix: "--error", label: "error", anchor: 8 },
     { prefix: "--warning", label: "warning", anchor: 8 },
     { prefix: "--success", label: "success", anchor: 8 },

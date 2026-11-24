@@ -743,6 +743,8 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     if (got === "waiting") {
       say("Still writing it into the code…");
       window.setTimeout(recover, 3000);
+    } else if (got && "failed" in got) {
+      say(`Couldn't put it in the app: ${got.failed}`, true);
     } else if (got) {
       // The component's styles look like this now; the variation on top would double it.
       on = -1;

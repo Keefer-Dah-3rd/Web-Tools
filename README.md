@@ -206,6 +206,13 @@ current scale's shape. The casing (neutral) scale can turn with the brand's hue 
 from pure grey to three times as colourful; the two supporting scales follow a harmony. The app
 recolours live, because the lab overrides the scale variables on `:root`.
 
+- **Theme** decides how much of the page follows: **Whole page** turns on Casing (surfaces and text
+  lean toward the brand's hue), Displays (scope glass, LCD, OLED), Accents (scope cyan, spectrum
+  green, LCD phosphor, gold, the Nibbit character) and Tracks (the 16 track colours, turned as one
+  wheel so they stay distinct). **Brand only** goes back to the brand and the casing's hue. Sliders
+  set how far the casing and displays lean in, and how vivid accents and tracks are (muted to
+  neon). Error, warning, success and info never move: they carry meaning. The theme is put on
+  before the app's first frame on the next load, so canvases (waveforms) draw in it too.
 - **Contrast** checks every role pairing from Mibbit's `scripts/palette-contrast.py` live; click it
   for the list, failures first.
 - **Original** (click, or hold O) flips back to the app's own colours to compare.
@@ -248,7 +255,7 @@ them into the project on its branch (`color-edits` for Mibbit), one commit per s
 
 | Save | How it gets into the code |
 |---|---|
-| Colour Lab, **Put it in the app** | No AI: the changed steps are written into `web/src/styles/tokens.css`, `scripts/palette-contrast.py` re-runs (a failing pairing refuses the palette and puts the file back) and its table in `docs/research/` is regenerated. |
+| Colour Lab, **Put it in the app** | No AI: the changed scale steps and accent colours are written into `web/src/styles/tokens.css`; a themed track wheel also updates its copy in `web/src/engine/padColors.ts` and the test that pins track 1, and that test must pass. `scripts/palette-contrast.py` re-runs (a failing pairing refuses the palette) and its table in `docs/research/` is regenerated. Any failure puts every file back. |
 | Design Generator, **Put it in the app** | Claude Code writes the variation into the component's stylesheet, replacing what it overrides (CSS files under `web/src/styles/` only). |
 | Toolbar, **Save** | Claude Code writes the text and style edits into the code (`web/src/` only); the toolbar reloads when they're in. |
 

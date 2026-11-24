@@ -71,7 +71,7 @@ export class CodeWriter {
    * After a reload: if an apply was in flight, ask the helper how it went. Returns the apply when it
    * finished (and remembers it for Undo), "waiting" while it's still running, or null.
    */
-  async recover(): Promise<Applied | "waiting" | null> {
+  async recover(): Promise<Applied | { failed: string } | "waiting" | null> {
     let pending: { file: string; name: string; at: string } | null = null;
     try {
       pending = JSON.parse(localStorage.getItem(this.pendingKey) ?? "null");
@@ -81,11 +81,15 @@ export class CodeWriter {
     if (!pending) return null;
     try {
       const res = await fetch(`${this.endpoint}/applied`);
-      const { log, busy } = (await res.json()) as { log: { save: string; commit: string; summary: string; files: string[]; at: string; undone?: string }[]; busy: string | null };
+      const { log, busy } = (await res.json()) as { log: { save: string; commit?: string; summary?: string; files?: string[]; at: string; undone?: string; failed?: string }[]; busy: string | null };
       const entry = log.find((e) => e.save === pending!.file && e.at >= pending!.at && !e.undone);
-      if (entry) {
+      if (entry?.failed) {
         localStorage.removeItem(this.pendingKey);
-        const applied = { commit: entry.commit, name: pending.name, summary: entry.summary, files: entry.files };
+        return { failed: entry.failed };
+      }
+      if (entry?.commit) {
+        localStorage.removeItem(this.pendingKey);
+        const applied = { commit: entry.commit, name: pending.name, summary: entry.summary ?? "", files: entry.files };
         this.last = applied;
         return applied;
       }

@@ -13,7 +13,7 @@
  */
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
 import type { PanelControl } from "../dock";
-import { HARMONIES, type Harmony, contrast, hexToLch, hueDelta, lchToHex, scaleAtHue, scaleFromSeed, turnScale } from "./palette";
+import { HARMONIES, type Harmony, type Lch3, contrast, evenWheel, hexToLch, hueDelta, lchToHex, round, scaleAtHue, scaleFromSeed, turnScale } from "./palette";
 
 export interface ScaleSpec {
   /** Variable prefix, e.g. "--brand" for --brand-50 … --brand-999. */
@@ -55,6 +55,15 @@ export interface PaletteSite {
   followers?: { selector: string; label: string }[];
   /** Other places with the old brand colour fixed in code, listed in saves for whoever applies them. */
   hardcoded?: string[];
+  /** The technical-display scale (scope glass, LCD, OLED) a theme can turn. */
+  displays?: ScaleSpec;
+  /**
+   * Fixed accent colours a theme can turn: each follows the brand's turn, or takes the harmony's
+   * second / third hue when a harmony is picked.
+   */
+  accents?: { token: string; label: string; follows: "brand" | "second" | "third" }[];
+  /** An identity colour wheel (track colours): its tokens, turned together by whole degrees so they stay distinct. */
+  tracks?: { tokens: string[] };
 }
 
 export interface LabOptions {
@@ -70,11 +79,25 @@ type HarmonyChoice = Harmony | "keep";
 
 interface LabState {
   seed: string;
+  /** The casing (surfaces and text) turns with the brand's hue. */
   casingFollow: boolean;
   /** Casing chroma multiplier, 1 = as designed, 0 = pure grey. */
   casingTint: number;
   harmony: HarmonyChoice;
+  /** The displays (scope glass, LCD) turn with the theme. */
+  displays: boolean;
+  /** Display chroma multiplier, 1 = as designed. */
+  displayTint: number;
+  /** The fixed accent colours turn with the theme. */
+  accents: boolean;
+  /** The track colour wheel turns with the theme. */
+  tracks: boolean;
+  /** Accent and track chroma multiplier: below 1 muted, above 1 neon. */
+  vividness: number;
 }
+
+/** A theme's settings as designed: everything off but the brand and the casing's hue. */
+const DEFAULTS: Omit<LabState, "seed"> = { casingFollow: true, casingTint: 1, harmony: "keep", displays: false, displayTint: 1, accents: false, tracks: false, vividness: 1 };
 
 interface Candidate extends LabState {
   name: string;
@@ -86,6 +109,11 @@ interface Scales {
   casing: string[];
   second: string[];
   third: string[];
+  displays: string[];
+  /** Accent token → colour. */
+  accents: Record<string, string>;
+  /** The track wheel as OKLCH (L, C, whole-degree H), or null when it isn't touched. */
+  tracks: Lch3[] | null;
 }
 
 const STYLE = `
@@ -133,6 +161,7 @@ input[type=range] { width: 100%; accent-color: #ff8a65; }
 .strip i { display: block; position: relative; }
 .strip i.anchor::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
 .strip.mini { height: 10px; border-radius: 4px; }
+.chips button.on { background: #ff8a65; color: #1d0c05; border-color: #ff8a65; }
 .check { display: flex; align-items: center; gap: 7px; color: #c8d2df; cursor: pointer; }
 .check input { accent-color: #ff8a65; }
 .score { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); cursor: pointer; width: 100%; text-align: left; }
@@ -184,9 +213,14 @@ const HTML = `
       </div>
     </section>
     <section>
-      <h4>Casing <span data-out="casing-note"></span></h4>
-      <label class="check"><input type="checkbox" data-in="follow"> Follows the brand's hue</label>
-      <label class="slider" style="margin-top:4px">Tint <input type="range" data-in="tint" min="0" max="3" step="0.05"><output data-out="tint"></output></label>
+      <h4>Theme <span data-out="theme-note"></span></h4>
+      <div class="row"><button data-act="whole" title="Casing, displays, accents and tracks all follow the brand">◉ Whole page</button><button data-act="brand-only" title="Only the brand and the casing's hue">Brand only</button></div>
+      <div class="chips" data-out="scopes" style="margin-top:6px"></div>
+      <div style="display:grid;gap:4px;margin-top:8px">
+        <label class="slider">Casing <input type="range" data-in="tint" min="0" max="3" step="0.05"><output data-out="tint"></output></label>
+        <label class="slider" data-out="dtint-row">Displays <input type="range" data-in="dtint" min="0" max="3" step="0.05"><output data-out="dtint"></output></label>
+        <label class="slider" data-out="vivid-row">Vividness <input type="range" data-in="vivid" min="0.3" max="1.5" step="0.05"><output data-out="vivid"></output></label>
+      </div>
     </section>
     <section>
       <h4>Supporting colours</h4>
@@ -236,7 +270,9 @@ function cssToHex(value: string): string | null {
 }
 
 const fmt = (n: number, d = 2) => n.toFixed(d);
-const same = (a: LabState, b: LabState) => a.seed.toUpperCase() === b.seed.toUpperCase() && a.casingFollow === b.casingFollow && Math.abs(a.casingTint - b.casingTint) < 1e-6 && a.harmony === b.harmony;
+/** A state's identity, for "is this the one showing": seed, switches and sliders (rounded). */
+const keyOf = (s: LabState) => JSON.stringify([s.seed.toUpperCase(), s.casingFollow, s.casingTint.toFixed(2), s.harmony, s.displays, s.displayTint.toFixed(2), s.accents, s.tracks, s.vividness.toFixed(2)]);
+const same = (a: LabState, b: LabState) => keyOf(a) === keyOf(b);
 
 let mounted = false;
 
@@ -245,12 +281,26 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   mounted = true;
   const { site, endpoint, storagePrefix } = options;
   const steps = site.steps;
+  // The app may already wear the theme being tried (its dev build applies the last one before its
+  // first frame, so canvases draw in it). Read the app's own colours with that switched off.
+  const early = document.getElementById("colour-lab-vars") as HTMLStyleElement | null;
+  if (early) early.media = "not all";
   const rootStyle = getComputedStyle(document.documentElement);
   const read = (spec: ScaleSpec) => steps.map((s) => cssToHex(rootStyle.getPropertyValue(`${spec.prefix}-${s}`)) ?? "#000000");
 
   // The app's own scales, read before the lab overrides anything.
-  const ref: Scales = { brand: read(site.brand), casing: read(site.casing), second: read(site.supporting[0]), third: read(site.supporting[1]) };
-  const ORIGINAL: LabState = { seed: ref.brand[site.brand.anchor], casingFollow: true, casingTint: 1, harmony: "keep" };
+  const tokenHex = (token: string) => cssToHex(rootStyle.getPropertyValue(token)) ?? "#000000";
+  const ref: Scales = {
+    brand: read(site.brand),
+    casing: read(site.casing),
+    second: read(site.supporting[0]),
+    third: read(site.supporting[1]),
+    displays: site.displays ? read(site.displays) : [],
+    accents: Object.fromEntries((site.accents ?? []).map((a) => [a.token, tokenHex(a.token)])),
+    tracks: site.tracks ? evenWheel(site.tracks.tokens.map((t) => [rootStyle.getPropertyValue(t), tokenHex(t)] as const)) : null,
+  };
+  const ORIGINAL: LabState = { seed: ref.brand[site.brand.anchor], ...DEFAULTS };
+  if (early) early.media = "";
 
   const stateKey = `${storagePrefix}:colour:state`;
   const keptKey = `${storagePrefix}:colour:kept`;
@@ -273,17 +323,20 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   };
 
   let state: LabState = { ...ORIGINAL, ...load<Partial<LabState>>(stateKey, {}) };
-  let kept: Candidate[] = load<Candidate[]>(keptKey, []);
-  let ideas: Candidate[] = load<Candidate[]>(ideasKey, []);
+  // Candidates kept before themes existed lack the theme switches: they mean "as designed".
+  let kept: Candidate[] = load<Candidate[]>(keptKey, []).map((c) => ({ ...DEFAULTS, ...c }));
+  let ideas: Candidate[] = load<Candidate[]>(ideasKey, []).map((c) => ({ ...DEFAULTS, ...c }));
   let comparing = false;
   let showPairs = false;
   const writer = new CodeWriter(endpoint, storagePrefix, "colour");
 
   // ---- the override sheet: unlayered :root rules beat the app's layered tokens
 
-  const sheet = document.createElement("style");
+  const sheet = early ?? document.createElement("style");
   sheet.id = "colour-lab-vars";
-  document.head.appendChild(sheet);
+  if (!early) document.head.appendChild(sheet);
+  /** The theme's CSS, kept for the app's dev build to apply before its first frame on the next load. */
+  const cssKey = `${storagePrefix}:colour:css`;
 
   function scalesFor(s: LabState): Scales {
     const seedLch = hexToLch(s.seed);
@@ -292,25 +345,45 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     const brand = s.seed.toUpperCase() === ORIGINAL.seed.toUpperCase() ? ref.brand : scaleFromSeed(ref.brand, s.seed, site.brand.anchor);
     const casingTurn = s.casingFollow ? turn : 0;
     const casing = Math.abs(casingTurn) < 0.01 && Math.abs(s.casingTint - 1) < 1e-6 ? ref.casing : turnScale(ref.casing, casingTurn, s.casingTint);
-    if (s.harmony === "keep") return { brand, casing, second: ref.second, third: ref.third };
-    const h = HARMONIES[s.harmony];
-    return {
-      brand,
-      casing,
-      second: scaleAtHue(ref.second, site.supporting[0].anchor, seedLch.H + h.second, h.chroma[0]),
-      third: scaleAtHue(ref.third, site.supporting[1].anchor, seedLch.H + h.third, h.chroma[1]),
-    };
+    const h = s.harmony === "keep" ? null : HARMONIES[s.harmony];
+    const second = h ? scaleAtHue(ref.second, site.supporting[0].anchor, seedLch.H + h.second, h.chroma[0]) : ref.second;
+    const third = h ? scaleAtHue(ref.third, site.supporting[1].anchor, seedLch.H + h.third, h.chroma[1]) : ref.third;
+    // Displays: with a harmony they take its second hue (a cool glass against the brand), else they turn with it.
+    const displays =
+      !site.displays || !s.displays
+        ? ref.displays
+        : h
+          ? scaleAtHue(ref.displays, site.displays.anchor, seedLch.H + h.second, s.displayTint)
+          : turnScale(ref.displays, turn, s.displayTint);
+    // Accents keep their lightness and colourfulness (times vividness) and move to the theme's hues.
+    const accents: Record<string, string> = { ...ref.accents };
+    if (s.accents)
+      for (const a of site.accents ?? []) {
+        const base = hexToLch(ref.accents[a.token]);
+        const hue = h && a.follows === "second" ? seedLch.H + h.second : h && a.follows === "third" ? seedLch.H + h.third : base.H + turn;
+        accents[a.token] = lchToHex({ L: base.L, C: base.C * s.vividness, H: hue });
+      }
+    // The track wheel turns as one, by whole degrees, so every track keeps its distance from the others.
+    const tracks = s.tracks && ref.tracks ? ref.tracks.map(([L, C, H]): Lch3 => [L, round(Math.min(0.37, C * s.vividness), 2), (((H + Math.round(turn)) % 360) + 360) % 360]) : null;
+    return { brand, casing, second, third, displays, accents, tracks };
   }
 
-  const specs = () => [site.brand, site.casing, site.supporting[0], site.supporting[1]] as const;
+  /** Every scale the lab can change, with its values now and as the app has them. */
+  const changedScales = (sc: Scales) =>
+    [
+      [site.brand, sc.brand, ref.brand],
+      [site.casing, sc.casing, ref.casing],
+      [site.supporting[0], sc.second, ref.second],
+      [site.supporting[1], sc.third, ref.third],
+      ...(site.displays ? [[site.displays, sc.displays, ref.displays] as const] : []),
+    ].filter(([, now, was]) => now !== was) as [ScaleSpec, string[], string[]][];
+  const changedAccents = (sc: Scales) => Object.entries(sc.accents).filter(([t, v]) => v !== ref.accents[t]);
+  const trackCss = ([L, C, H]: Lch3) => `oklch(${L.toFixed(2)} ${C.toFixed(2)} ${H})`;
   function cssFor(sc: Scales): string {
-    const list = [sc.brand, sc.casing, sc.second, sc.third];
-    const refs = [ref.brand, ref.casing, ref.second, ref.third];
     const decls: string[] = [];
-    specs().forEach((spec, k) => {
-      if (list[k] === refs[k]) return;
-      steps.forEach((step, i) => decls.push(`${spec.prefix}-${step}: ${list[k][i]};`));
-    });
+    for (const [spec, now] of changedScales(sc)) steps.forEach((step, i) => decls.push(`${spec.prefix}-${step}: ${now[i]};`));
+    for (const [token, value] of changedAccents(sc)) decls.push(`${token}: ${value};`);
+    if (sc.tracks && site.tracks) sc.tracks.forEach((lch, i) => decls.push(`${site.tracks!.tokens[i]}: ${trackCss(lch)};`));
     let css = decls.length ? `:root {\n  ${decls.join("\n  ")}\n}` : "";
     // Fixed-colour parts follow the brand's hue and colourfulness by filter (a preview only).
     if (sc.brand !== ref.brand && site.followers?.length) {
@@ -362,6 +435,10 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       .map((h, i) => `<i class="${i === anchor && !mini ? "anchor" : ""}" style="background:${h}" title="${steps[i]} ${h}"></i>`)
       .join("")}</div>`;
 
+  /** A strip of named colours (not scale steps). */
+  const flat = (hexes: string[], names?: string[]) =>
+    `<div class="strip" style="--n:${hexes.length}">${hexes.map((h, i) => `<i style="background:${h}" title="${names?.[i] ?? i + 1} ${h}"></i>`).join("")}</div>`;
+
   /** Each contrast pairing as it resolves on the page right now. */
   function checkContrast() {
     const cs = getComputedStyle(document.documentElement);
@@ -377,9 +454,17 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   let frame = 0;
   function apply(save = true) {
     const sc = scalesFor(state);
-    sheet.textContent = comparing ? "" : cssFor(sc);
+    const css = cssFor(sc);
+    sheet.textContent = comparing ? "" : css;
     host.style.setProperty("--seed", state.seed);
     if (save) store(stateKey, state);
+    if (!comparing) {
+      try {
+        localStorage.setItem(cssKey, css);
+      } catch {
+        /* fine: drawings just pick the theme up on their next redraw */
+      }
+    }
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => render(sc));
   }
@@ -397,10 +482,25 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     }
     out("anchor").textContent = `seed = ${site.brand.prefix}-${steps[site.brand.anchor]}`;
     out("seed-note").textContent = state.seed.toUpperCase() === ORIGINAL.seed.toUpperCase() ? "The app's own brand colour." : `Was ${ORIGINAL.seed}.`;
-    input("follow").checked = state.casingFollow;
-    input("tint").value = String(state.casingTint);
-    out("tint").textContent = `${Math.round(state.casingTint * 100)}%`;
-    out("casing-note").textContent = state.casingTint === 0 ? "pure grey" : state.casingFollow ? "turns with the brand" : "keeps its hue";
+    const scopes: [keyof LabState, string, boolean][] = [
+      ["casingFollow", "Casing", true],
+      ["displays", "Displays", !!site.displays],
+      ["accents", "Accents", !!site.accents?.length],
+      ["tracks", "Tracks", !!site.tracks],
+    ];
+    out("scopes").innerHTML = scopes
+      .filter(([, , has]) => has)
+      .map(([k, label]) => `<button data-scope="${k}" class="${state[k] ? "on" : ""}" title="${label} follow the brand">${state[k] ? "✓ " : ""}${label}</button>`)
+      .join("");
+    const following = scopes.filter(([k, , has]) => has && state[k]).map(([, l]) => l.toLowerCase());
+    out("theme-note").textContent = following.length === scopes.filter(([, , has]) => has).length ? "the whole page" : following.length ? `brand + ${following.join(", ")}` : "brand only";
+    for (const [k, v] of [["tint", state.casingTint], ["dtint", state.displayTint], ["vivid", state.vividness]] as const) {
+      const range = input(k);
+      if (root.activeElement !== range) range.value = String(v);
+      out(k).textContent = `${Math.round(v * 100)}%`;
+    }
+    out("dtint-row").hidden = !site.displays || !state.displays;
+    out("vivid-row").hidden = !state.accents && !state.tracks;
 
     out("seeds").innerHTML = site.seeds
       .map(([name, h]) => `<button data-seed="${h}" class="${h.toUpperCase() === state.seed.toUpperCase() ? "on" : ""}"><i style="background:${h}"></i>${name}</button>`)
@@ -409,17 +509,23 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       .map((k) => `<button data-harmony="${k}" class="${state.harmony === k ? "on" : ""}">${k === "keep" ? "As designed" : HARMONIES[k as Harmony].label}</button>`)
       .join("");
 
-    const rows = [
+    const rows: [ScaleSpec, string[]][] = [
       [site.brand, sc.brand],
       [site.casing, sc.casing],
+      ...(site.displays ? [[site.displays, sc.displays] as [ScaleSpec, string[]]] : []),
       [site.supporting[0], sc.second],
       [site.supporting[1], sc.third],
-    ] as const;
+    ];
+    const accentHexes = (site.accents ?? []).map((a) => sc.accents[a.token]);
+    const trackHexes = (sc.tracks ?? ref.tracks ?? []).map(([L, C, H]) => lchToHex({ L, C, H }));
     out("scales").innerHTML =
       `<h4>Scales <span>${comparing ? "showing the original" : "live on the page"}</span></h4>` +
       rows.map(([spec, hexes]) => `<div class="scale"><div class="name">${spec.label}<em>${spec.hint ?? ""}</em></div>${strip(hexes, spec.anchor)}</div>`).join("") +
+      (accentHexes.length ? `<div class="scale"><div class="name">Accents<em>${state.accents ? "follow the theme" : "as designed"}</em></div>${flat(accentHexes, (site.accents ?? []).map((a) => a.label))}</div>` : "") +
+      (trackHexes.length ? `<div class="scale"><div class="name">Tracks<em>${state.tracks ? "follow the theme" : "as designed"}</em></div>${flat(trackHexes)}</div>` : "") +
       (site.locked.length ? `<p class="note">Locked: ${site.locked.map((s) => s.label).join(", ")}.</p>` : "") +
-      (site.followers?.length ? `<p class="note">${site.followers.map((f) => f.label).join(", ")}: colours fixed in code, previewed by turning their hue.</p>` : "");
+      (site.followers?.length ? `<p class="note">${site.followers.map((f) => f.label).join(", ")}: colours fixed in code, previewed by turning their hue.</p>` : "") +
+      `<p class="note">Waveforms and other drawings keep the colours they were drawn in: reload to see them in the theme.</p>`;
 
     const checks = checkContrast();
     const rated = checks.filter((c) => c.verdict === "pass" || c.verdict === "fail");
@@ -447,7 +553,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       const on = same(c, state);
       return `<div class="card${on ? " on" : ""}" data-${list}="${i}" role="button" tabindex="0">
         <div class="top"><i style="background:${c.seed}"></i>${escapeHtml(c.name)}<span>${c.harmony === "keep" ? "" : HARMONIES[c.harmony].label}</span>${list === "kept" ? `<button class="x" data-drop="${i}" title="Forget">✕</button>` : ""}</div>
-        ${strip(s.brand, undefined, true)}${strip(s.casing, undefined, true)}
+        ${strip(s.brand, undefined, true)}${strip(s.casing, undefined, true)}${s.tracks ? strip(s.tracks.map(([L, C, H]) => lchToHex({ L, C, H })), undefined, true) : ""}
         ${c.why ? `<p>${escapeHtml(c.why)}</p>` : ""}
       </div>`;
     };
@@ -481,17 +587,16 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       setSeed(lchToHex(lch));
     });
   }
-  input("follow").addEventListener("change", (e) => {
-    state = { ...state, casingFollow: (e.target as HTMLInputElement).checked };
-    apply();
-  });
-  input("tint").addEventListener("input", (e) => {
-    state = { ...state, casingTint: Number((e.target as HTMLInputElement).value) };
-    apply();
-  });
+  for (const [k, field] of [["tint", "casingTint"], ["dtint", "displayTint"], ["vivid", "vividness"]] as const) {
+    input(k).addEventListener("input", (e) => {
+      state = { ...state, [field]: Number((e.target as HTMLInputElement).value) };
+      apply();
+    });
+  }
 
   const pickCard = (c: Candidate) => {
-    state = { seed: c.seed, casingFollow: c.casingFollow, casingTint: c.casingTint, harmony: c.harmony };
+    const { name: _name, why: _why, ...settings } = c;
+    state = { ...DEFAULTS, ...settings };
     apply();
     say(`Showing “${c.name}”.`);
   };
@@ -505,7 +610,19 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     const drop = t.closest<HTMLElement>("[data-drop]")?.dataset.drop;
     const idea = t.closest<HTMLElement>("[data-ideas]")?.dataset.ideas;
     const keptAt = t.closest<HTMLElement>("[data-kept]")?.dataset.kept;
-    if (drop != null) {
+    const scope = t.closest<HTMLElement>("[data-scope]")?.dataset.scope as "casingFollow" | "displays" | "accents" | "tracks" | undefined;
+    if (scope) {
+      state = { ...state, [scope]: !state[scope] };
+      apply();
+    } else if (act === "whole") {
+      // The whole page: everything follows, and the neutrals lean in enough to see it.
+      state = { ...state, casingFollow: true, displays: true, accents: true, tracks: true, casingTint: Math.max(state.casingTint, 1.6), displayTint: Math.max(state.displayTint, 1.4) };
+      apply();
+      say("The whole page follows the brand now. Casing and Displays set how far the neutrals lean in.");
+    } else if (act === "brand-only") {
+      state = { ...state, casingFollow: true, displays: false, accents: false, tracks: false, casingTint: 1, displayTint: 1, vividness: 1 };
+      apply();
+    } else if (drop != null) {
       kept.splice(Number(drop), 1);
       store(keptKey, kept);
       apply(false);
@@ -602,13 +719,16 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           mood: words,
-          current: { seed: state.seed, harmony: state.harmony, casingTint: state.casingTint, brand: scalesFor(state).brand },
+          current: { ...state, brand: scalesFor(state).brand },
           original: { seed: ORIGINAL.seed, brand: ref.brand, casing: ref.casing },
           kept: kept.map((k) => k.seed),
           harmonies: Object.keys(HARMONIES),
         }),
       });
-      const data = (await res.json()) as { palettes?: { name: string; seed: string; harmony: string; casingTint: number; casingFollow: boolean; why: string }[]; error?: string };
+      const data = (await res.json()) as {
+        palettes?: { name: string; seed: string; harmony: string; casingTint: number; casingFollow: boolean; displays?: boolean; displayTint?: number; accents?: boolean; tracks?: boolean; vividness?: number; why: string }[];
+        error?: string;
+      };
       if (!res.ok || !data.palettes) throw new Error(data.error ?? `The helper answered ${res.status}.`);
       ideas = data.palettes
         .filter((p) => /^#[0-9a-f]{6}$/i.test(p.seed))
@@ -619,6 +739,11 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
           harmony: (p.harmony in HARMONIES ? p.harmony : "keep") as HarmonyChoice,
           casingTint: Math.min(3, Math.max(0, Number(p.casingTint) || 1)),
           casingFollow: p.casingFollow !== false,
+          displays: !!p.displays,
+          displayTint: Math.min(3, Math.max(0, Number(p.displayTint) || 1)),
+          accents: !!p.accents,
+          tracks: !!p.tracks,
+          vividness: Math.min(1.5, Math.max(0.3, Number(p.vividness) || 1)),
         }));
       store(ideasKey, ideas);
       apply(false);
@@ -636,20 +761,22 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     const sc = scalesFor(state);
     const checks = checkContrast();
     const name = input("name").value.trim() || kept.find((k) => same(k, state))?.name || state.seed;
-    const list = [sc.brand, sc.casing, sc.second, sc.third];
-    const refs = [ref.brand, ref.casing, ref.second, ref.third];
-    const byStep = (hexes: string[]) => Object.fromEntries(steps.map((s, i) => [s, hexes[i]]));
-    const changed = specs()
-      .map((spec, k) => ({ prefix: spec.prefix, now: list[k], before: refs[k] }))
-      .filter((c) => c.now !== c.before);
+    const byStep = (hexes: string[]) => Object.fromEntries(steps.map((st, i) => [st, hexes[i]]));
+    const changed = changedScales(sc).map(([spec, now, was]) => ({ prefix: spec.prefix, now, before: was }));
+    const accents = changedAccents(sc);
     const payload = {
       name,
       savedAt: new Date().toISOString(),
       url: location.href,
-      note: "A palette from the Colour Lab. scales holds every step to write into the tokens file (only scales that changed); was holds the app's values before. settings re-creates it in the lab. fixedInCode lists places that paint the old brand with fixed colours, which need their code changed to follow. contrast lists pairings below their floor at save time.",
+      note: "A palette from the Colour Lab. scales holds every step to write into the tokens file (only scales that changed); roles holds single colour tokens (accents) and tracks the identity colour wheel; was holds the app's values before. settings re-creates it in the lab. fixedInCode lists places that paint the old brand with fixed colours, which need their code changed to follow. contrast lists pairings below their floor at save time.",
       settings: state,
       scales: Object.fromEntries(changed.map((c) => [c.prefix, byStep(c.now)])),
       was: Object.fromEntries(changed.map((c) => [c.prefix, byStep(c.before)])),
+      // Single colour tokens (accents) to write as they are, and what they were.
+      roles: Object.fromEntries(accents),
+      rolesWas: Object.fromEntries(accents.map(([t]) => [t, ref.accents[t]])),
+      // The track wheel, as OKLCH (L, C, whole-degree H), in token order; null when untouched.
+      tracks: sc.tracks && site.tracks ? { tokens: site.tracks.tokens, lch: sc.tracks, was: ref.tracks } : null,
       fixedInCode: [...(site.followers ?? []).map((f) => `${f.label} (${f.selector}): previewed by hue filter only`), ...(site.hardcoded ?? [])],
       contrast: {
         failing: checks.filter((c) => c.verdict === "fail").map((c) => ({ fg: c.fg, bg: c.bg, ratio: Number(fmt(c.ratio, 2)), min: c.min, use: c.use })),
@@ -665,6 +792,12 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       btn.disabled = true;
       btn.textContent = "Writing it in…";
       say("Writing the palette into the app's colour tokens and re-checking contrast.");
+      // The page may reload mid-apply: it should come back in the app's new colours, not the preview on top.
+      try {
+        localStorage.removeItem(cssKey);
+      } catch {
+        /* fine */
+      }
       try {
         const done = await writer.apply("palette", data.name, name);
         // The tokens now hold this palette: start the lab fresh from them.
@@ -687,6 +820,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     const keep = state;
     try {
       localStorage.removeItem(stateKey);
+      localStorage.removeItem(cssKey);
     } catch {
       /* fine */
     }
@@ -730,6 +864,8 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     if (got === "waiting") {
       say("Still writing it into the code…");
       window.setTimeout(recover, 3000);
+    } else if (got && "failed" in got) {
+      say(`Couldn't put it in the app: ${got.failed}`, true);
     } else if (got) {
       // The tokens hold the palette now; the lab's own override would double it.
       state = { ...ORIGINAL };

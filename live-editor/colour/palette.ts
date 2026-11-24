@@ -150,3 +150,31 @@ export function contrast(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 }
+
+/** OKLCH as a plain triple: lightness, chroma, hue. */
+export type Lch3 = [number, number, number];
+export const round = (n: number, d: number) => Math.round(n * 10 ** d) / 10 ** d;
+
+/** "oklch(0.80 0.17 68)" → [0.8, 0.17, 68]; any other colour through its hex (2 decimals, whole degrees). */
+export function lchOf(value: string, hex: string): Lch3 {
+  const m = value.match(/oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+  if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+  const l = hexToLch(hex);
+  return [round(l.L, 2), round(l.C, 2), Math.round(l.H)];
+}
+
+/**
+ * An identity colour wheel as OKLCH, from each slot's CSS value and its hex. A slot written as hex
+ * (say the wheel's start) only gives an approximate hue back, which would break the wheel's
+ * evenness once turned: it takes the exact hue half a turn from its opposite slot instead, when
+ * that one is written in OKLCH.
+ */
+export function evenWheel(slots: (readonly [string, string])[]): Lch3[] {
+  const exact = slots.map(([value]) => /oklch\(/.test(value));
+  const wheel = slots.map(([value, hex]) => lchOf(value, hex));
+  const half = wheel.length / 2;
+  return wheel.map(([L, C, H], i) => {
+    const opposite = (i + half) % wheel.length;
+    return !exact[i] && Number.isInteger(half) && exact[opposite] ? [L, C, (wheel[opposite][2] + 180) % 360] : [L, C, H];
+  });
+}
