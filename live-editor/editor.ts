@@ -599,11 +599,19 @@ export function mountEditor(options: EditorOptions | string): void {
     }
   };
   let reapply = 0;
-  new MutationObserver(() => {
-    if (!edits.some((e) => e.html != null) && !textApplied.size) return;
+  // Watch the page for redraws only while there are words to keep in place: a busy app (a playing
+  // sequencer) changes its DOM every frame, and an idle observer would still pay for every change.
+  const textWatch = new MutationObserver(() => {
     window.clearTimeout(reapply);
     reapply = window.setTimeout(applyTexts, 60);
-  }).observe(shadow ?? document.body, { childList: true, subtree: true, characterData: true });
+  });
+  let watching = false;
+  const watchTexts = () => {
+    const needed = edits.some((e) => e.html != null) || textApplied.size > 0;
+    if (needed && !watching) textWatch.observe(shadow ?? document.body, { childList: true, subtree: true, characterData: true });
+    if (!needed && watching) textWatch.disconnect();
+    watching = needed;
+  };
 
   /** A collapsed range at a point on screen, looking inside the shadow root too. */
   const caretAt = (x: number, y: number): Range | null => {
@@ -905,6 +913,7 @@ export function mountEditor(options: EditorOptions | string): void {
     edits = edits.filter((e) => !isEmpty(e));
     sheet.textContent = rules();
     applyTexts();
+    watchTexts();
     try {
       localStorage.setItem(storeKey, JSON.stringify(edits));
     } catch {

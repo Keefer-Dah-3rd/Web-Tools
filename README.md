@@ -181,7 +181,10 @@ editor's helper instead of the Vite plugin:
 npm run mibbit
 ```
 
-Then open <http://localhost:5173/?tools>. The app's dev-only loader (`web/src/dev/designTools.ts`
+Then open <http://localhost:5173/?tools>. A small dock sits in the bottom-left corner: **✎ Edit**
+(⌥E, the toolbar), **◐ Colour** (⌥C, Colour Lab), **✦ Design** (⌥D, Design Generator); its dot (⌥H)
+hides every tool for a clean look at the app, with your changes still on. If the helper isn't
+running, a note in that corner says so. The app's dev-only loader (`web/src/dev/designTools.ts`
 in the Mibbit repo) pulls the toolbar from the helper and keeps it on in that browser;
 `?tools=off` hides it. The Type style and colour buttons are Mibbit's own (fonts and tokens from
 `web/src/styles/tokens.css`), rewrites follow `sites/mibbit-brief.md` (Mibbit's voice), and saves go
@@ -191,7 +194,7 @@ components it sits in, e.g. `in TrackTab < CanvasRow2 < SongCanvas`.
 
 #### Colour Lab (Mibbit)
 
-The **◐ Colour Lab** pill (bottom left) opens a palette lab on the running app. Pick a seed colour
+**◐ Colour** in the dock (⌥C) opens a palette lab on the running app. Pick a seed colour
 (or a quick pick, or the Hue / Chroma / Lightness sliders) and the brand's whole 13-step scale is
 re-derived from it in OKLCH: the seed lands exactly on step 800 and the other steps keep the
 current scale's shape. The casing (neutral) scale can turn with the brand's hue and its tint can go
@@ -215,7 +218,7 @@ pairings) and `sites/mibbit-palette-brief.md` (what Claude is told).
 
 #### Design Generator (Mibbit)
 
-The **✦ Design** pill (bottom left, above Colour Lab) makes new designs for one part of the app,
+**✦ Design** in the dock (⌥D) makes new designs for one part of the app,
 tried in place. **◎ Pick a part** and click anything (↑ ↓ while picking, or **Bigger** /
 **Smaller**, change how much of it you take); choose **Every one like it** (every element with that
 class, e.g. all 16 pattern chips) or **Just this one**. Say what to try (or tap a quick pick) and
@@ -257,3 +260,11 @@ the reload.
 
 Code: `live-editor/apply.mjs` (the applies, guards and Undo), `live-editor/applied.ts` (the
 panels' Apply / Undo).
+
+#### Staying out of the app's way
+
+Folded tools cost nothing while the app runs: the toolbar only watches the page for redraws while
+it has text edits to keep in place, and the Design Generator only tracks its outline while open.
+Measured on Mibbit playing a beat (10 s, browser pane): 0 ms of long tasks with the tools loaded
+and folded, the same as without them (191 ms before this change). `mountDock` (`live-editor/dock.ts`)
+replaces the panels' own pills (`launcher: false`); without a dock each panel shows its pill.

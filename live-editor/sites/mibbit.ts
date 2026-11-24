@@ -11,9 +11,10 @@
  * Source paths in saves are relative to the repo's web/ folder (React 19 gives a compiled line, marked ~).
  */
 import { mountEditor } from "../editor";
-import { MIBBIT_NAMES, MIBBIT_SWATCHES, MIBBIT_TYPES } from "../../page-editor/presets/mibbit";
+import { MIBBIT_NAMES, MIBBIT_TYPES, mibbitSwatches } from "../../page-editor/presets/mibbit";
 import { mountColourLab } from "../colour/lab";
 import { mountDesignGenerator } from "../design/generator";
+import { mountDock } from "../dock";
 import { MIBBIT_DESIGN } from "./mibbit-design";
 import { MIBBIT_PALETTE } from "./mibbit-palette";
 
@@ -26,21 +27,32 @@ const route = (location.hash.replace(/^#\/?/, "") || location.pathname.replace(/
 mountEditor({
   page: route || "studio",
   types: MIBBIT_TYPES,
-  swatches: MIBBIT_SWATCHES,
+  swatches: mibbitSwatches(),
   names: MIBBIT_NAMES,
   storagePrefix: "mibbit-tools",
 });
 
 // The Colour Lab: regenerate the brand and casing scales live (bottom-left pill).
-mountColourLab({
+const colour = mountColourLab({
+  launcher: false,
   site: MIBBIT_PALETTE,
   endpoint: window.__pageEditorLive?.endpoint ?? "http://127.0.0.1:5198/__page-editor",
   storagePrefix: "mibbit-tools",
 });
 
 // The Design Generator: three CSS variations of a picked part, tried in place (pill above Colour Lab).
-mountDesignGenerator({
+const design = mountDesignGenerator({
+  launcher: false,
   site: MIBBIT_DESIGN,
   endpoint: window.__pageEditorLive?.endpoint ?? "http://127.0.0.1:5198/__page-editor",
   storagePrefix: "mibbit-tools",
+});
+
+// One launcher in Mibbit's bottom bar (empty on the left) instead of floating pills; ⌥E ⌥C ⌥D, ⌥H hides all.
+mountDock({
+  storagePrefix: "mibbit-tools",
+  tools: [
+    ...(colour ? [{ label: "Colour", icon: "◐", code: "KeyC", control: colour }] : []),
+    ...(design ? [{ label: "Design", icon: "✦", code: "KeyD", control: design }] : []),
+  ],
 });

@@ -10,6 +10,7 @@
  */
 
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
+import type { PanelControl } from "../dock";
 
 export interface DesignSite {
   /** Quick picks for what to change. */
@@ -21,6 +22,8 @@ export interface DesignSite {
 }
 
 export interface GeneratorOptions {
+  /** Show the panel's own pill. Off when a dock opens it instead. Default on. */
+  launcher?: boolean;
   site: DesignSite;
   endpoint: string;
   storagePrefix: string;
@@ -178,8 +181,8 @@ const scoped = (selector: string, css: string) => `${selector} {\n${cleanCss(css
 
 let mounted = false;
 
-export function mountDesignGenerator(options: GeneratorOptions): void {
-  if (mounted || document.getElementById("design-generator")) return;
+export function mountDesignGenerator(options: GeneratorOptions): PanelControl | null {
+  if (mounted || document.getElementById("design-generator")) return null;
   mounted = true;
   const { site, endpoint, storagePrefix } = options;
   const keptKey = `${storagePrefix}:design:kept`;
@@ -231,15 +234,19 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
   const remember = () => store(lastKey, { target, ask: askBox.value, variants, on });
   const say = (text: string, err = false) => {
     const el = out("status");
-    el.textContent = text;
+    // Long answers (Claude's summaries) stay short here; the whole text is on hover.
+    el.textContent = text.length > 220 ? `${text.slice(0, 217).trimEnd()}…` : text;
+    el.title = text.length > 220 ? text : "";
     el.classList.toggle("err", err);
   };
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
   const setOpen = (open: boolean) => {
     panel.hidden = !open;
-    pill.hidden = open;
+    pill.hidden = open || options.launcher === false;
     store(openKey, open);
+    followWhileOpen(open);
+    follow();
     if (open) window.dispatchEvent(new CustomEvent("review-tool:open", { detail: "design-generator" }));
     if (!open) stopPicking();
   };
@@ -410,7 +417,12 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
   };
   window.addEventListener("scroll", follow, { passive: true, capture: true });
   window.addEventListener("resize", follow);
-  window.setInterval(follow, 500);
+  // The outline follows the part only while the panel is open (an app can move things without scrolling).
+  let following = 0;
+  const followWhileOpen = (open: boolean) => {
+    window.clearInterval(following);
+    if (open) following = window.setInterval(follow, 500);
+  };
 
   // ---- context for Claude
 
@@ -742,4 +754,5 @@ export function mountDesignGenerator(options: GeneratorOptions): void {
   };
   void recover();
 
+  return { open: () => setOpen(true), close: () => setOpen(false), isOpen: () => !panel.hidden };
 }

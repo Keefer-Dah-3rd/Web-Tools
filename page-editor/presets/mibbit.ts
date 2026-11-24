@@ -1,6 +1,6 @@
 // Mibbit (the groovebox web app): its type system and palette, taken from the app's design tokens
 // (web/src/styles/tokens.css, 2026-11-24) and its op1-design-language skill. Pass these to mountEditor:
-//   mountEditor({ page: "studio", types: MIBBIT_TYPES, swatches: MIBBIT_SWATCHES, names: MIBBIT_NAMES })
+//   mountEditor({ page: "studio", types: MIBBIT_TYPES, swatches: mibbitSwatches(), names: MIBBIT_NAMES })
 // The type styles use the app's own font variables, so they match what the app loads.
 
 import type { SwatchGroup, TypeStyle } from "../editor";
@@ -17,34 +17,38 @@ export const MIBBIT_TYPES: Record<string, TypeStyle> = {
   lcd: { label: "LCD", hint: "DSEG7", css: "font-family: var(--font-lcd); font-weight: 400; letter-spacing: 0.04em; text-transform: none;" },
 };
 
-/** Quick-pick colours: the app's roles first, then the scales they come from. */
-export const MIBBIT_SWATCHES: SwatchGroup[] = [
+/** Quick-pick colours, by token: the app's roles first, then the scales they come from. */
+const SWATCH_TOKENS: { group: string; tokens: [string, string][] }[] = [
   {
     group: "Roles",
-    colours: [
-      ["ink", "#F6F4F5"], ["ink-secondary", "#C6BEBC"], ["ink-muted", "#AFA3A1"], ["outline", "#998A89"], ["divider", "#504643"], ["graphite", "#241E1E"], ["shell-edge", "#110D0C"],
-      ["brand", "#AA0017"], ["brand-hover", "#C02829"], ["brand-lit", "#E7665C"], ["brand-ink", "#F0B0A8"], ["focus", "#ED8D81"],
+    tokens: [
+      ["ink", "--color-ink"], ["ink-secondary", "--color-ink-secondary"], ["ink-muted", "--color-ink-muted"], ["outline", "--color-outline"], ["divider", "--color-divider"], ["graphite", "--color-graphite"], ["shell-edge", "--color-shell-edge"],
+      ["brand", "--color-brand"], ["brand-hover", "--color-brand-hover"], ["brand-lit", "--color-brand-lit"], ["brand-ink", "--color-brand-ink"], ["focus", "--color-focus"],
     ],
   },
   {
     group: "OP-1 accents",
-    colours: [["blue", "#00D5F4"], ["green", "#00F44E"], ["white", "#FFFFF6"], ["lcd-on", "#C7F08A"], ["gold-soft", "#E8C87A"], ["warning", "#B7842D"], ["success", "#5BC86B"], ["info", "#4A86F5"], ["error", "#E95F56"]],
+    tokens: [["blue", "--color-blue"], ["green", "--color-green"], ["white", "--color-white"], ["lcd-on", "--color-lcd-on"], ["gold-soft", "--color-gold-soft"], ["warning", "--color-warning"], ["success", "--color-success"], ["info", "--color-info"], ["error", "--color-error"]],
   },
-  {
-    group: "Brand red scale",
-    colours: [
-      ["brand-100", "#F8E3E0"], ["brand-300", "#F0B0A8"], ["brand-500", "#E7665C"], ["brand-600", "#E53335"], ["brand-700", "#C02829"], ["brand-800", "#AA0017"],
-      ["brand-900", "#6F1314"], ["brand-950", "#47090A"], ["brand-975", "#260204"],
-    ],
-  },
-  {
-    group: "Warm casing scale",
-    colours: [
-      ["warm-50", "#F6F4F5"], ["warm-200", "#D9D5D4"], ["warm-400", "#AFA3A1"], ["warm-600", "#807371"], ["warm-800", "#504643"], ["warm-900", "#393230"],
-      ["warm-950", "#241E1E"], ["warm-975", "#110D0C"], ["warm-999", "#020202"],
-    ],
-  },
+  { group: "Brand scale", tokens: ["100", "300", "500", "600", "700", "800", "900", "950", "975"].map((s) => [`brand-${s}`, `--brand-${s}`]) },
+  { group: "Casing scale", tokens: ["50", "200", "400", "600", "800", "900", "950", "975", "999"].map((s) => [`warm-${s}`, `--warm-${s}`]) },
 ];
+
+/**
+ * The quick-pick colours as the app has them right now (read from its tokens on the page), so a
+ * palette written into tokens.css shows up here without editing this file. Call it in the browser.
+ */
+export function mibbitSwatches(): SwatchGroup[] {
+  const cs = getComputedStyle(document.documentElement);
+  const hex = (token: string) => {
+    const v = cs.getPropertyValue(token).trim();
+    return /^#[0-9a-f]{6}$/i.test(v) ? v.toUpperCase() : null;
+  };
+  return SWATCH_TOKENS.map(({ group, tokens }) => ({
+    group,
+    colours: tokens.map(([name, token]) => [name, hex(token)] as [string, string | null]).filter((c): c is [string, string] => !!c[1]),
+  })).filter((g) => g.colours.length);
+}
 
 /** Names the AI-pattern check may see capitalised. */
 export const MIBBIT_NAMES = ["Mibbit", "Mibbits", "Mibbles", "Nibbit", "OP-1", "Explore", "Inbox", "Crews", "People", "Sampler", "BPM", "SPLIT"];

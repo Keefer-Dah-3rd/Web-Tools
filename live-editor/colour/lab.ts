@@ -12,6 +12,7 @@
  * sites/mibbit-palette.ts.
  */
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
+import type { PanelControl } from "../dock";
 import { HARMONIES, type Harmony, contrast, hexToLch, hueDelta, lchToHex, scaleAtHue, scaleFromSeed, turnScale } from "./palette";
 
 export interface ScaleSpec {
@@ -57,6 +58,8 @@ export interface PaletteSite {
 }
 
 export interface LabOptions {
+  /** Show the panel's own pill. Off when a dock opens it instead. Default on. */
+  launcher?: boolean;
   site: PaletteSite;
   /** The helper's endpoint (…/__page-editor). */
   endpoint: string;
@@ -237,8 +240,8 @@ const same = (a: LabState, b: LabState) => a.seed.toUpperCase() === b.seed.toUpp
 
 let mounted = false;
 
-export function mountColourLab(options: LabOptions): void {
-  if (mounted || document.getElementById("colour-lab")) return;
+export function mountColourLab(options: LabOptions): PanelControl | null {
+  if (mounted || document.getElementById("colour-lab")) return null;
   mounted = true;
   const { site, endpoint, storagePrefix } = options;
   const steps = site.steps;
@@ -337,13 +340,15 @@ export function mountColourLab(options: LabOptions): void {
 
   const say = (text: string, err = false) => {
     const el = out("status");
-    el.textContent = text;
+    // Long answers (Claude's summaries) stay short here; the whole text is on hover.
+    el.textContent = text.length > 220 ? `${text.slice(0, 217).trimEnd()}…` : text;
+    el.title = text.length > 220 ? text : "";
     el.classList.toggle("err", err);
   };
 
   const setOpen = (open: boolean) => {
     panel.hidden = !open;
-    pill.hidden = open;
+    pill.hidden = open || options.launcher === false;
     store(openKey, open);
     if (open) window.dispatchEvent(new CustomEvent("review-tool:open", { detail: "colour-lab" }));
   };
@@ -735,4 +740,6 @@ export function mountColourLab(options: LabOptions): void {
   void recover();
 
   if (!same(state, ORIGINAL)) say("Your last palette is on. Reset goes back to the app's own.");
+
+  return { open: () => setOpen(true), close: () => setOpen(false), isOpen: () => !panel.hidden };
 }
