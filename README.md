@@ -252,9 +252,22 @@ role tokens, and its variations restyle the shared tokens (corners, shadows, sur
 those parts. Colour roles stay single palette steps (the Colour Lab owns colour, and the contrast
 check reads only that).
 
-**Inspiration**: drop, paste (⌘V) or choose up to four images. They're kept by the helper
-(`live-editor/edits/<site>/inspiration/`) and Claude looks at each one when it designs (Claude Code
-gets the Read tool for that folder only), saying in each variation which image it draws on.
+**References** (up to six) are what Claude learns from:
+
+- **Images**: drop, paste (⌘V) or choose screenshots, moodboards, photos of hardware. Click one to
+  open it large and **click-drag boxes** around the parts you like. Each box (and the whole image)
+  has checkboxes for what to learn: colour, typography, type layout, box style, cards, buttons,
+  dropdowns and menus, inputs and toggles, knobs and sliders, icons, spacing and density, depth
+  and shadows, texture and materials, layout and grid, tabs and navigation, meters and charts,
+  imagery and illustration, overall mood; plus a note. Nothing ticked means everything.
+- **⬚ Mark part of the app**: click-drag over parts of the running app you like; Claude gets their
+  styles and CSS rules, with the same checkboxes.
+
+Claude reads every image and a zoomed crop of every box (the helper keeps them in
+`live-editor/edits/<site>/inspiration/`; Claude Code gets the Read tool for that folder only) and
+says in each variation which reference and box it draws on. The board is shared: the Colour
+Lab's Ask Claude uses the references marked for colour (or mood, or nothing ticked) when
+"Use references marked for colour" is on. Code: `live-editor/references.ts`.
 
 **Keep** remembers a variation (with its part) for later; **Put it in the app** has Claude write it
 into the component's stylesheet (see Putting saves into the code below), keeping a record in

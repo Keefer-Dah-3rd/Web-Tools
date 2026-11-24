@@ -13,6 +13,7 @@
  */
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
 import type { PanelControl } from "../dock";
+import { ReferenceBoard } from "../references";
 import { HARMONIES, type Harmony, type Lch3, contrast, evenWheel, hexToLch, hueDelta, lchToHex, round, scaleAtHue, scaleFromSeed, turnScale } from "./palette";
 
 export interface ScaleSpec {
@@ -239,6 +240,7 @@ const HTML = `
       <h4>Ask Claude</h4>
       <textarea data-in="mood" rows="2" placeholder="A mood, e.g. late-night studio, warmer, less alarm-red"></textarea>
       <div class="chips" data-out="moods" style="margin-top:6px"></div>
+      <label class="check" style="margin-top:6px" title="References live in the Design tab: tick Colour on the images or boxes whose colour you like"><input type="checkbox" data-in="use-refs" checked> Use references marked for colour <em data-out="refs-n" style="font-style:normal;color:#9aa6b6"></em></label>
       <div class="row" style="margin-top:6px"><button data-act="ask">✦ Suggest 3 palettes</button></div>
       <div class="cards" data-out="ideas" style="margin-top:6px"></div>
     </section>
@@ -332,6 +334,9 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   let comparing = false;
   let showPairs = false;
   const writer = new CodeWriter(endpoint, storagePrefix, "colour");
+  /** The Design tab's reference board, read for the references marked for colour (or for everything). */
+  const refBoard = new ReferenceBoard({ endpoint, storagePrefix, say: (t, e) => say(t, e), describeParts: () => ({ label: "", styles: "" }) });
+  const forColour = (aspects: string[]) => !aspects.length || aspects.includes("colour") || aspects.includes("mood");
 
   // ---- the override sheet: unlayered :root rules beat the app's layered tokens
 
@@ -602,6 +607,8 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     out("ideas").innerHTML = ideas.map((c, i) => card(c, i, "ideas")).join("");
     out("kept").innerHTML = kept.map((c, i) => card(c, i, "kept")).join("");
     out("kept-count").textContent = kept.length ? String(kept.length) : "";
+    const nRefs = refBoard.marked("colour");
+    out("refs-n").textContent = nRefs ? `(${nRefs})` : "(none yet, add them in Design)";
     out("moods").innerHTML = site.moods.map((m) => `<button data-mood="${escapeHtml(m)}">${escapeHtml(m)}</button>`).join("");
     $<HTMLButtonElement>("[data-act=compare]").classList.toggle("on", comparing);
     out("applied").innerHTML = appliedRow(writer.last, escapeHtml);
@@ -764,6 +771,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
           current: { ...state, brand: scalesFor(state).brand },
           original: { seed: ORIGINAL.seed, brand: ref.brand, casing: ref.casing },
           kept: kept.map((k) => k.seed),
+          references: input("use-refs").checked ? await refBoard.payload(forColour) : [],
           harmonies: Object.keys(HARMONIES),
         }),
       });

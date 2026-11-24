@@ -415,8 +415,9 @@ function palettePrompt(req) {
 async function palette(cfg, req) {
   if (!cfg.paletteBrief) return { error: "This site has no palette brief (paletteBrief in its config)." };
   const system = briefFrom(cfg.paletteBrief);
-  const prompt = palettePrompt(req);
-  const cli = await askCli(cfg, system, prompt, PALETTE_SCHEMA);
+  const refs = referencesBlock(cfg, req.references, "palette");
+  const prompt = palettePrompt(req) + refs.text;
+  const cli = await askCli(cfg, system, prompt, PALETTE_SCHEMA, refs.images ? { readDir: inspirationDir(cfg) } : {});
   if (cli.ok) return { ...cli.answer, via: "Claude Code" };
   if (!cfg.sessionFallback) return { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error };
   const session = await askSession(cfg, system, prompt, PALETTE_SCHEMA);
@@ -539,18 +540,9 @@ function designPrompt(req) {
 async function design(cfg, req) {
   if (!cfg.designBrief) return { error: "This site has no design brief (designBrief in its config)." };
   const system = designSystem(cfg);
-  const images = inspirationFiles(cfg, req.inspiration);
-  const prompt = designPrompt(req) + (images.length
-    ? [
-        "",
-        "",
-        "## Visual inspiration",
-        "The designer added these images as inspiration. Read each one before you write anything:",
-        ...images.map((f) => `- ${f}`),
-        "Take cues from them (palette relationships, shape language, depth and texture, density, the feel of the type) and translate them into Mibbit's tokens and parts. Don't copy logos, words or exact layouts. In each variation's why, say which image it draws on and how.",
-      ].join("\n")
-    : "");
-  const cli = await askCli(cfg, system, prompt, DESIGN_SCHEMA, images.length ? { readDir: inspirationDir(cfg) } : {});
+  const refs = referencesBlock(cfg, req.references, "design");
+  const prompt = designPrompt(req) + refs.text;
+  const cli = await askCli(cfg, system, prompt, DESIGN_SCHEMA, refs.images ? { readDir: inspirationDir(cfg) } : {});
   if (cli.ok) return { ...cli.answer, via: "Claude Code" };
   if (!cfg.sessionFallback) return { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error };
   const session = await askSession(cfg, system, prompt, DESIGN_SCHEMA);
@@ -618,18 +610,64 @@ export async function handleApplied(cfg, req, res) {
 const inspirationDir = (cfg) => join(cfg.editsDir, "inspiration");
 const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
-/** The saved inspiration images a request names (by id), as absolute paths; unknown ids are dropped. */
-function inspirationFiles(cfg, ids) {
-  if (!Array.isArray(ids)) return [];
+const ASPECT_WORDS = {
+  colour: "colour", typography: "typography", "type-layout": "type layout", box: "box style (shapes, borders, corners)", cards: "card design",
+  buttons: "buttons", dropdowns: "dropdowns and menus", inputs: "inputs and toggles", controls: "knobs and sliders", icons: "icons",
+  spacing: "spacing and density", depth: "depth and shadows", texture: "texture and materials", layout: "layout and grid",
+  navigation: "tabs and navigation", data: "meters and charts", imagery: "imagery and illustration", mood: "overall mood",
+};
+const aspectWords = (list) => {
+  const words = (Array.isArray(list) ? list : []).map((a) => ASPECT_WORDS[a]).filter(Boolean);
+  return words.length ? words.join(", ") : "everything about it";
+};
+
+/** The saved image for an id, as an absolute path, or null. */
+function imageFile(cfg, id) {
+  if (!/^[a-f0-9]{16}$/.test(String(id))) return null;
   const dir = inspirationDir(cfg);
-  if (!existsSync(dir)) return [];
-  const files = readdirSync(dir);
-  return ids
-    .slice(0, 4)
-    .filter((id) => /^[a-f0-9]{16}$/.test(String(id)))
-    .map((id) => files.find((f) => f.startsWith(`${id}.`)))
-    .filter(Boolean)
-    .map((f) => join(dir, f));
+  if (!existsSync(dir)) return null;
+  const f = readdirSync(dir).find((n) => n.startsWith(`${id}.`));
+  return f ? join(dir, f) : null;
+}
+
+/**
+ * The designer's references as a prompt section: each image (and the zoomed crop of every box
+ * on it) with what to learn from it, and each marked part of the app with its styles.
+ */
+function referencesBlock(cfg, refs, use) {
+  if (!Array.isArray(refs) || !refs.length) return { text: "", images: 0 };
+  const lines = [];
+  let images = 0;
+  refs.slice(0, 6).forEach((ref, i) => {
+    const n = i + 1;
+    const note = clip(ref.note, 300);
+    if (ref.kind === "image") {
+      const file = imageFile(cfg, ref.id);
+      if (!file) return;
+      images++;
+      lines.push(`Reference ${n}: an image, ${file}`);
+      const regions = Array.isArray(ref.regions) ? ref.regions.slice(0, 8) : [];
+      if (!regions.length || (Array.isArray(ref.aspects) && ref.aspects.length)) lines.push(`  From the whole image, learn: ${aspectWords(ref.aspects)}.${note ? ` The designer says: "${note}"` : ""}`);
+      regions.forEach((r, j) => {
+        const crop = imageFile(cfg, r.cropId);
+        const b = r.box ?? {};
+        const pct = (v) => Math.round(Number(v) * 100);
+        const where = `x ${pct(b.x)}–${pct(b.x + b.w)}%, y ${pct(b.y)}–${pct(b.y + b.h)}% of the image`;
+        const rNote = clip(r.note, 300);
+        if (crop) images++;
+        lines.push(`  Box ${String.fromCharCode(65 + j)} (${where}${crop ? `; zoomed crop: ${crop}` : ""}): learn ${aspectWords(r.aspects?.length ? r.aspects : ref.aspects)}.${rNote ? ` The designer says: "${rNote}"` : ""}`);
+      });
+    } else if (ref.kind === "app") {
+      lines.push(`Reference ${n}: parts of this app the designer likes (${clip(ref.label, 120)}). Learn: ${aspectWords(ref.aspects)}.${note ? ` The designer says: "${note}"` : ""}`);
+      lines.push(String(ref.styles ?? "").slice(0, 7000).replace(/^/gm, "  "));
+    }
+  });
+  if (!lines.length) return { text: "", images: 0 };
+  const how =
+    use === "palette"
+      ? "Read every image and crop listed, then let the colour in them (the parts marked for colour, or all of it where nothing is marked) shape the palettes: the seed, how warm or cool the casing is, how vivid the accents are. Say in each palette's why which reference it draws on."
+      : "Read every image and crop listed before you write anything. From each reference learn only what the designer ticked (\"everything about it\" where nothing is ticked), and translate it into this app's tokens and parts: don't copy logos, words or exact layouts. In each variation's why, say which reference (and box) it draws on.";
+  return { text: ["", "", "## References from the designer", how, "", ...lines].join("\n"), images };
 }
 
 /** POST <endpoint>/inspiration {dataUrl}: keep an image the designer added; answers its id. */
@@ -646,4 +684,17 @@ export function handleInspiration(cfg, req, res) {
     writeFileSync(join(dir, `${id}.${IMAGE_TYPES[m[1]]}`), bytes);
     reply(200, { id });
   });
+}
+
+/** GET <endpoint>/inspiration/<id>: one kept image (the board's editor shows it large and crops it). */
+export function serveInspiration(cfg, id, res) {
+  const file = imageFile(cfg, id);
+  if (!file) {
+    res.statusCode = 404;
+    return res.end("Not found");
+  }
+  const type = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif" }[file.split(".").pop()] ?? "application/octet-stream";
+  res.setHeader("content-type", type);
+  res.setHeader("cache-control", "private, max-age=3600");
+  res.end(readFileSync(file));
 }

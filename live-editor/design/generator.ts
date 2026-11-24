@@ -10,6 +10,7 @@
  */
 
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
+import { BOARD_STYLE, ReferenceBoard } from "../references";
 import type { PanelControl } from "../dock";
 
 export interface DesignSite {
@@ -102,12 +103,7 @@ textarea, input[type=text] { font: 500 12px/1.35 inherit; font-family: inherit; 
 .note { color: #8e9aab; font-size: 11px; margin: 0; }
 .drop { border-radius: 10px; transition: background .15s, outline-color .15s; outline: 2px dashed transparent; outline-offset: 4px; }
 .drop.over { outline-color: #b48cff; background: rgba(180,140,255,.08); }
-.inspo { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.inspo:empty { display: none; }
-.inspo figure { position: relative; margin: 0; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.16); background: #000; }
-.inspo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.inspo button { position: absolute; top: 3px; right: 3px; padding: 0 5px; font-size: 10px; line-height: 16px; border-radius: 999px; background: rgba(0,0,0,.7); border-color: rgba(255,255,255,.3); }
-.inspo figure.busy { opacity: .45; }
+${BOARD_STYLE}
 label.add { font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); padding: 6px 9px; white-space: nowrap; }
 label.add:hover { background: rgba(255, 255, 255, 0.13); }
 .head, .status, .foot, .applied { flex: none; }
@@ -149,12 +145,13 @@ const HTML = `
       <div class="row" style="margin-top:8px"><button class="primary" data-act="make">✦ Make 3 variations</button><button data-act="more" title="Three more, different from these">More</button></div>
     </section>
     <section class="drop" data-out="drop">
-      <h4>Inspiration <span data-out="inspo-count"></span></h4>
-      <div class="inspo" data-out="inspo"></div>
+      <h4>References <span data-out="inspo-count"></span></h4>
+      <div class="refs" data-out="refs"></div>
       <div class="row" style="margin-top:6px">
-        <label class="add">＋ Add images<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden data-in="files"></label>
-        <span class="note">or drop or paste (⌘V) them here. Claude looks at them when it designs.</span>
+        <label class="add">＋ Images<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden data-in="files"></label>
+        <button data-act="mark-app" title="Click-drag over parts of the app you like">⬚ Mark part of the app</button>
       </div>
+      <p class="note" style="margin-top:6px">Drop or paste (⌘V) images too. Click a reference to box the parts you like and tick what Claude should learn: colour, type, cards…</p>
     </section>
     <section>
       <h4>Variations <span data-out="showing"></span></h4>
@@ -247,10 +244,8 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   let variants: Variant[] = last.variants ?? [];
   let on = last.on ?? -1;
   let kept: Kept[] = load<Kept[]>(keptKey, []);
-  /** Inspiration images: the helper keeps the image (id), the panel a small thumbnail. */
-  const inspoKey = `${storagePrefix}:design:inspiration`;
-  let inspiration: { id: string; thumb: string }[] = load<{ id: string; thumb: string }[]>(inspoKey, []);
-  let uploading = 0;
+  /** What Claude learns from: images (with boxes and checkboxes) and marked parts of the app. Built below. */
+  let board: ReferenceBoard;
   let picking = false;
   let hovered: Element | null = null;
   let original = false;
@@ -644,7 +639,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
               }),
           tokens: tokensNow(),
           avoid: more ? variants.map((v) => `${v.name}: ${v.why}`) : [],
-          inspiration: inspiration.map((i) => i.id),
+          references: await board.payload(),
           viewport: { width: innerWidth, height: innerHeight },
         }),
       });
@@ -690,7 +685,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
           why: v.why,
           target: { ...target, markup: target.scope === "app" ? "" : markupOf(element) },
           css: cleanCss(v.css),
-          inspiration: inspiration.map((i) => i.id),
+          references: await board.payload(),
         }),
       });
       const data = (await res.json()) as { file?: string; name?: string; canApply?: boolean; error?: string };
@@ -772,10 +767,8 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       )
       .join("");
     out("kept-count").textContent = kept.length ? String(kept.length) : "";
-    out("inspo-count").textContent = inspiration.length || uploading ? `${inspiration.length + uploading} of 4` : "";
-    out("inspo").innerHTML =
-      inspiration.map((im, i) => `<figure><img src="${im.thumb}" alt="Inspiration ${i + 1}"><button data-unspire="${i}" title="Remove">✕</button></figure>`).join("") +
-      Array.from({ length: uploading }, () => `<figure class="busy"></figure>`).join("");
+    const refCount = (board as ReferenceBoard | undefined)?.count ?? 0;
+    out("inspo-count").textContent = refCount ? `${refCount} of 6` : "";
     out("applied").innerHTML = appliedRow(writer.last, esc);
     follow();
   }
@@ -789,13 +782,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     const vi = t.closest<HTMLElement>("[data-variant]")?.dataset.variant;
     const drop = t.closest<HTMLElement>("[data-drop]")?.dataset.drop;
     const ki = t.closest<HTMLElement>("[data-kept]")?.dataset.kept;
-    const unspire = t.closest<HTMLElement>("[data-unspire]")?.dataset.unspire;
-    if (unspire != null) {
-      inspiration.splice(Number(unspire), 1);
-      store(inspoKey, inspiration);
-      render();
-      return;
-    }
+
     if (drop != null) {
       kept.splice(Number(drop), 1);
       store(keptKey, kept);
@@ -832,6 +819,10 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       else stopPicking();
       render();
     } else if (act === "whole-app") chooseWholeApp();
+    else if (act === "mark-app") {
+      stopPicking();
+      board.markApp();
+    }
     else if (act === "parent" && element?.parentElement && element.parentElement !== document.body) choose(element.parentElement);
     else if (act === "child" && element?.firstElementChild) choose(element.firstElementChild);
     else if (act === "make") void make(false);
@@ -856,55 +847,34 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
 
   askBox.addEventListener("input", remember);
 
-  // ---- inspiration images: add by file picker, drop or paste
+  // ---- references: images (file picker, drop, paste) and marked parts of the app
 
-  /** An image file → a data URL no bigger than `edge` px on its long side (JPEG for photos, PNG otherwise). */
-  const shrink = (file: File, edge: number): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        const k = Math.min(1, edge / Math.max(img.naturalWidth, img.naturalHeight));
-        const c = document.createElement("canvas");
-        c.width = Math.max(1, Math.round(img.naturalWidth * k));
-        c.height = Math.max(1, Math.round(img.naturalHeight * k));
-        c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-        URL.revokeObjectURL(url);
-        resolve(c.toDataURL(file.type === "image/png" || file.type === "image/gif" ? "image/png" : "image/jpeg", 0.88));
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error(`Couldn't read ${file.name || "that image"}.`));
-      };
-      img.src = url;
-    });
-
-  async function addImages(files: File[]) {
-    const room = 4 - inspiration.length - uploading;
-    const images = files.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
-    if (!images.length) return say("Add PNG, JPEG, WebP or GIF images.", true);
-    if (room <= 0) return say("Four images at most: remove one first.", true);
-    const take = images.slice(0, room);
-    uploading += take.length;
-    render();
-    for (const file of take) {
-      try {
-        const [full, thumb] = await Promise.all([shrink(file, 1600), shrink(file, 160)]);
-        const res = await fetch(`${endpoint}/inspiration`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dataUrl: full }) });
-        const data = (await res.json()) as { id?: string; error?: string };
-        if (!res.ok || !data.id) throw new Error(data.error ?? `The helper answered ${res.status}.`);
-        if (!inspiration.some((i) => i.id === data.id)) inspiration.push({ id: data.id, thumb });
-        store(inspoKey, inspiration);
-      } catch (e) {
-        say(`Couldn't add that image: ${(e as Error).message}`, true);
-      } finally {
-        uploading--;
-        render();
-      }
+  /** App parts as Claude sees them: what they are, how they look, the CSS that styles them. */
+  const describeParts = (els: Element[]) => {
+    const kinds = new Map<string, number>();
+    for (const el of els) {
+      const k = `${el.tagName.toLowerCase()}${kindClass(el) ? `.${kindClass(el)}` : ""}`;
+      kinds.set(k, (kinds.get(k) ?? 0) + 1);
     }
-    if (images.length > take.length) say("Four images at most: the rest weren't added.", true);
-    else say(`${inspiration.length} inspiration image${inspiration.length === 1 ? "" : "s"}. Claude looks at them on the next Make.`);
-  }
+    // A label a designer reads: how many parts, the component they're in (spaced out), and their words.
+    const component = componentsOf(els[0])?.replace(/^in /, "").split(" < ")[0];
+    const spaced = component?.replace(/([a-z])([A-Z])/g, "$1 $2");
+    const words = els.map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4).map((w) => w.slice(0, 12)).join(" ");
+    const label = `${els.length} part${els.length === 1 ? "" : "s"}${spaced ? ` in ${spaced}` : ` (${[...kinds.keys()][0]})`}${words ? ` · ${words}` : ""}`;
+    const classes = new Set<string>();
+    for (const el of els) for (const node of [el, ...el.querySelectorAll("*")].slice(0, 80)) for (const c of node.classList) classes.add(c);
+    const parts = els
+      .slice(0, 8)
+      .map((el) => {
+        const words = (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+        return `- ${el.tagName.toLowerCase()}${kindClass(el) ? `.${kindClass(el)}` : ""}${words ? ` “${words}”` : ""} (${componentsOf(el) ?? "no component"}): ${computedOf(el)}`;
+      })
+      .join("\n");
+    return { label, styles: `${parts}\n\nThe app's CSS rules for them:\n${rulesForClasses([...classes]).slice(0, 8000)}` };
+  };
+  board = new ReferenceBoard({ endpoint, storagePrefix, say, describeParts, onChange: () => render() });
+  board.mount(out("refs"));
+  const addImages = (files: File[]) => board.addFiles(files);
 
   $<HTMLInputElement>("[data-in=files]").addEventListener("change", (e) => {
     const input = e.target as HTMLInputElement;
