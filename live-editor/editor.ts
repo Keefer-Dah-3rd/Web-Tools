@@ -941,6 +941,8 @@ export function mountEditor(options: EditorOptions | string): void {
     if (!picked) return;
     const edit = editFor(picked, true);
     if (!edit) return;
+    // Whatever was being hovered is now real (or not): show the element as it is.
+    peekSheet.textContent = "";
     apply(edit, picked);
     commit();
   };
@@ -1139,7 +1141,9 @@ export function mountEditor(options: EditorOptions | string): void {
     return parseFloat(getComputedStyle(el).fontSize);
   };
   const setSize = (px: number) => change((e) => (e.fontSize = Math.max(6, Math.round(px * 2) / 2)));
-  const setScale = (scale: number) => change((e) => (e.scale = Math.min(2.5, Math.max(0.3, Math.round(scale * 100) / 100))));
+  /** A scale as the toolbar keeps it: 30%–250%, whole percents. */
+  const clampScale = (scale: number) => Math.min(2.5, Math.max(0.3, Math.round(scale * 100) / 100));
+  const setScale = (scale: number) => change((e) => (e.scale = clampScale(scale)));
   const setColour = (hex: string) => {
     peekSheet.textContent = "";
     change((e) => (target === "color" ? (e.color = hex) : (e.fill = hex)));
@@ -1152,8 +1156,9 @@ export function mountEditor(options: EditorOptions | string): void {
     const swatch = hovered.closest<HTMLElement>("[data-colour]");
     const typeKey = hovered.closest<HTMLElement>("[data-type]")?.dataset.type;
     const sizeAct = hovered.closest<HTMLElement>("[data-act=smaller], [data-act=bigger], [data-act=size-reset]")?.dataset.act;
+    const scaleAct = hovered.closest<HTMLElement>("[data-act=shrink], [data-act=grow], [data-act=scale-reset]")?.dataset.act;
     window.clearTimeout(peekOff);
-    if (!swatch && !(typeKey && TYPE[typeKey]) && !sizeAct) {
+    if (!swatch && !(typeKey && TYPE[typeKey]) && !sizeAct && !scaleAct) {
       if (peekSheet.textContent) peekOff = window.setTimeout(() => (peekSheet.textContent = ""), 80);
       return;
     }
@@ -1161,7 +1166,11 @@ export function mountEditor(options: EditorOptions | string): void {
     let look: string;
     if (swatch) look = `${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important;`;
     else if (typeKey) look = TYPE[typeKey].css.replace(/;/g, " !important;");
-    else {
+    else if (scaleAct) {
+      // The scale a click would give: 5% from the element's own scale (as edited), or as designed.
+      const now = editFor(picked, false)?.scale ?? 1;
+      look = `zoom: ${scaleAct === "shrink" ? clampScale(now - 0.05) : scaleAct === "grow" ? clampScale(now + 0.05) : 1} !important;`;
+    } else {
       // The size a click would give: one step from the size it has now (read without the preview).
       const now = sizeNow(picked);
       const was = parseFloat(editFor(picked, false)?.was.fontSize ?? "") || now;
