@@ -195,6 +195,30 @@ input[type=range] { width: 100%; accent-color: #ff8a65; }
 .busy { opacity: .7; pointer-events: none; }
 ${APPLIED_STYLE}
 ${BOARD_STYLE}
+/* The preview card: the app's own tokens (inherited from the page), so it shows exactly what's on. */
+.pv { margin-top: 8px; display: grid; gap: 6px; padding: 8px; border-radius: 12px; background: var(--surface-base, #110d0c); border: 1px solid rgba(255,255,255,.1); }
+.pv-card { display: grid; gap: 8px; padding: 10px; border-radius: var(--radius-md, 8px); background: var(--surface-raised, #241e1e); box-shadow: var(--shadow-neu-raised, none); font-family: var(--font-ui, system-ui); }
+.pv-head { display: flex; align-items: baseline; gap: 7px; }
+.pv-head b { color: var(--color-ink); font-size: 12.5px; }
+.pv-head span { color: var(--color-ink-muted); font: 500 10px var(--font-mono, monospace); margin-left: auto; }
+.pv-chip { width: 9px; height: 9px; border-radius: 3px; background: var(--pad-color-0); align-self: center; }
+.pv-steps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.pv-steps i { height: 16px; border-radius: var(--radius-xs, 4px); background: var(--surface-recessed-deep, #020202); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--hue) 30%, transparent); }
+.pv-steps i.lit { background: var(--hue); }
+.pv-steps i.playing { box-shadow: var(--shadow-step-playing, 0 0 0 2px #fff); }
+.pv-tracks { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.pv-tracks i { height: 5px; border-radius: 3px; }
+.pv-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pv-btn { background: var(--color-brand); color: var(--color-on-brand); padding: 4px 10px; border-radius: var(--radius-sm, 6px); font: 600 11px var(--font-ui, system-ui); }
+.pv-ghost { color: var(--color-brand-ink); padding: 3px 9px; border-radius: var(--radius-sm, 6px); outline: 2px solid var(--color-focus); outline-offset: -2px; font: 600 11px var(--font-ui, system-ui); }
+.pv-drop { color: var(--color-ink-secondary); background: var(--surface-recessed); padding: 4px 9px; border-radius: var(--radius-sm, 6px); font: 500 11px var(--font-mono, monospace); border: 1px solid var(--color-divider); }
+.pv-text { margin: 0; font-size: 11.5px; color: var(--color-ink); }
+.pv-text .muted { color: var(--color-ink-muted); }
+.pv-text .ink { color: var(--color-brand-ink); font-weight: 600; }
+.pv-glass { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: var(--radius-sm, 6px); background: var(--display-bg, #1f2122); }
+.pv-glass svg { width: 100%; height: 30px; display: block; }
+.pv-lcd { font: 16px var(--font-lcd, monospace); color: var(--color-lcd-on); background: var(--color-lcd-bg); padding: 2px 6px; border-radius: 4px; }
+.pv-phos { font: 600 10px var(--font-mono, monospace); color: var(--lcd-lit); letter-spacing: .12em; }
 .drop { border-radius: 10px; transition: background .15s, outline-color .15s; outline: 2px dashed transparent; outline-offset: 4px; }
 label.add { font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); padding: 6px 9px; white-space: nowrap; }
 label.add:hover { background: rgba(255, 255, 255, 0.13); }
@@ -220,6 +244,20 @@ const HTML = `
         <label class="slider">Hue <input type="range" data-in="H" min="0" max="360" step="1"><output data-out="H"></output></label>
         <label class="slider">Chroma <input type="range" data-in="C" min="0" max="0.3" step="0.002"><output data-out="C"></output></label>
         <label class="slider">Lightness <input type="range" data-in="L" min="0.15" max="0.85" step="0.002"><output data-out="L"></output></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button data-act="preview-card" title="A small set of the app's parts in this palette">◑ Preview</button>
+        <label class="check" title="Hovering a colour, harmony or palette shows it on the app; click to keep it"><input type="checkbox" data-in="hover-preview"> Preview on hover</label>
+      </div>
+      <div class="pv" data-out="preview" hidden>
+        <div class="pv-card">
+          <div class="pv-head"><i class="pv-chip"></i><b>Rumble kick</b><span>T1 · 130 BPM</span></div>
+          <div class="pv-steps">${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<i class="${[0, 2, 5].includes(i) ? "lit" : ""}${i === 4 ? " playing" : ""}" style="--hue: var(--pad-color-${i % 4})"></i>`).join("")}</div>
+          <div class="pv-tracks">${Array.from({ length: 8 }, (_, i) => `<i style="background: var(--pad-color-${i * 2})"></i>`).join("")}</div>
+          <div class="pv-row"><span class="pv-btn">Sign up</span><span class="pv-ghost">Explore</span><span class="pv-drop">Swing 54% ▾</span></div>
+          <p class="pv-text"><span>Main text</span> <span class="muted">muted label</span> <span class="ink">brand word</span></p>
+        </div>
+        <div class="pv-glass"><svg viewBox="0 0 120 34" preserveAspectRatio="none"><polyline points="0,20 10,12 20,24 30,8 40,22 50,14 60,26 70,10 80,20 90,16 100,24 110,12 120,18" fill="none" stroke="var(--color-blue)" stroke-width="1.6"/><polyline points="0,30 15,26 30,28 45,18 60,22 75,14 90,20 105,16 120,24" fill="none" stroke="var(--color-green)" stroke-width="1.2" opacity=".9"/></svg><span class="pv-lcd">130.0</span><span class="pv-phos">BPM</span></div>
       </div>
     </section>
     <section>
@@ -348,6 +386,12 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   let ideas: Candidate[] = load<Candidate[]>(ideasKey, []).map((c) => ({ ...DEFAULTS, ...c }));
   let comparing = false;
   let showPairs = false;
+  /** A palette being hovered (shown on the page until the pointer leaves), or null. */
+  let peeking: LabState | null = null;
+  const peekKey = `${storagePrefix}:colour:hover-preview`;
+  const cardKey = `${storagePrefix}:colour:preview-card`;
+  let hoverPreview = load<boolean>(peekKey, true);
+  let previewCard = load<boolean>(cardKey, false);
   const writer = new CodeWriter(endpoint, storagePrefix, "colour");
   /** The reference board (shared with the Design tab): what Claude learns colour from. */
   const refBoard = new ReferenceBoard({ endpoint, storagePrefix, say: (t, e) => say(t, e), defaultAspects: ["colour"], onChange: () => apply(false) });
@@ -507,7 +551,8 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
 
   let frame = 0;
   function apply(save = true) {
-    const sc = scalesFor(state);
+    // Hovering a palette shows it on the page (and in the strips) without choosing it.
+    const sc = scalesFor(peeking ?? state);
     const css = cssFor(sc);
     const next = comparing ? "" : css;
     if (sheet.textContent !== next) {
@@ -515,12 +560,12 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       // Canvases that resolved their colours once (waveforms, scopes) listen and redraw.
       window.dispatchEvent(new Event("palettechange"));
     }
-    host.style.setProperty("--seed", state.seed);
+    host.style.setProperty("--seed", (peeking ?? state).seed);
     if (save) {
       store(stateKey, state);
       record();
     }
-    if (!comparing) {
+    if (!comparing && !peeking) {
       try {
         localStorage.setItem(cssKey, css);
       } catch {
@@ -562,6 +607,9 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       out(k).textContent = `${Math.round(v * 100)}%`;
     }
     out("dtint-row").hidden = !site.displays || !state.displays;
+    out("preview").hidden = !previewCard;
+    $<HTMLButtonElement>("[data-act=preview-card]").classList.toggle("on", previewCard);
+    input("hover-preview").checked = hoverPreview;
     out("vivid-row").hidden = !state.accents && !state.tracks;
 
     out("seeds").innerHTML = site.seeds
@@ -634,6 +682,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
 
   const setSeed = (hex: string) => {
     if (!/^#[0-9a-f]{6}$/i.test(hex)) return;
+    peeking = null;
     state = { ...state, seed: hex.toUpperCase() };
     apply();
   };
@@ -659,8 +708,50 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     });
   }
 
+  input("hover-preview").addEventListener("change", (e) => {
+    hoverPreview = (e.target as HTMLInputElement).checked;
+    store(peekKey, hoverPreview);
+  });
+
+  /** The palette a hovered thing stands for: a quick-pick colour, a harmony, or a whole palette card. */
+  const paletteUnder = (t: HTMLElement): LabState | null => {
+    const seed = t.closest<HTMLElement>("[data-seed]")?.dataset.seed;
+    if (seed) return { ...state, seed: seed.toUpperCase() };
+    const harmony = t.closest<HTMLElement>("[data-harmony]")?.dataset.harmony as HarmonyChoice | undefined;
+    if (harmony) return { ...state, harmony };
+    const idea = t.closest<HTMLElement>("[data-ideas]")?.dataset.ideas;
+    const keptAt = t.closest<HTMLElement>("[data-kept]")?.dataset.kept;
+    const c = idea != null ? ideas[Number(idea)] : keptAt != null ? kept[Number(keptAt)] : null;
+    if (!c) return null;
+    const { name: _n, why: _w, ...settings } = c;
+    return { ...DEFAULTS, ...settings };
+  };
+  let peekTimer = 0;
+  root.addEventListener("pointerover", (e) => {
+    if (!hoverPreview || comparing) return;
+    const next = paletteUnder(e.target as HTMLElement);
+    window.clearTimeout(peekTimer);
+    if (!next) {
+      if (peeking) peekTimer = window.setTimeout(() => ((peeking = null), apply(false)), 120);
+      return;
+    }
+    if (peeking && same(peeking, next)) return;
+    // A short pause, so sweeping the pointer across the chips doesn't flash every palette.
+    peekTimer = window.setTimeout(() => {
+      peeking = same(next, state) ? null : next;
+      apply(false);
+    }, 90);
+  });
+  panel.addEventListener("pointerleave", () => {
+    window.clearTimeout(peekTimer);
+    if (!peeking) return;
+    peeking = null;
+    apply(false);
+  });
+
   const pickCard = (c: Candidate) => {
     const { name: _name, why: _why, ...settings } = c;
+    peeking = null;
     state = { ...DEFAULTS, ...settings };
     apply();
     say(`Showing “${c.name}”.`);
@@ -693,6 +784,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
       apply(false);
     } else if (seed) setSeed(seed);
     else if (harmony) {
+      peeking = null;
       state = { ...state, harmony };
       apply();
     } else if (mood) {
@@ -714,6 +806,11 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     else if (act === "save") void save();
     else if (act === "undo-apply") void undoApply();
     else if (act === "mark-app") refBoard.markApp();
+    else if (act === "preview-card") {
+      previewCard = !previewCard;
+      store(cardKey, previewCard);
+      apply(false);
+    }
   });
 
   // Original: hold the button (or O) to see the app's own colours; a click toggles.

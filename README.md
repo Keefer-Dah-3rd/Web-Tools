@@ -220,6 +220,12 @@ recolours live, because the lab overrides the scale variables on `:root`.
   the analyzer) redraw in the theme as it changes: the lab fires `palettechange` and Mibbit's
   canvases re-read their colours (`onPaletteChange` in its `resolvedPalette.ts`); on a reload the
   theme is put on before the first frame.
+- **Preview**: under the colour picker, **◑ Preview** opens a small set of the app's own parts (a
+  track card with lit and playing steps, the track colours, a brand button, a focused button, a
+  dropdown, text, the scope and the LCD) drawn from the page's tokens, so it shows exactly what's on.
+  **Preview on hover** (on by default) shows a quick-pick colour, a harmony, or a palette from
+  Claude or Kept on the whole app while the pointer is over it; moving away puts yours back,
+  clicking keeps it.
 - **Contrast** checks every role pairing from Mibbit's `scripts/palette-contrast.py` live; click it
   for the list, failures first.
 - **Original** (click, or hold O) flips back to the app's own colours to compare.
