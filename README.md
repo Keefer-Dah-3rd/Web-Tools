@@ -265,9 +265,13 @@ check reads only that).
 
 Claude reads every image and a zoomed crop of every box (the helper keeps them in
 `live-editor/edits/<site>/inspiration/`; Claude Code gets the Read tool for that folder only) and
-says in each variation which reference and box it draws on. The board is shared: the Colour
-Lab's Ask Claude uses the references marked for colour (or mood, or nothing ticked) when
-"Use references marked for colour" is on. Code: `live-editor/references.ts`.
+says in each variation which reference and box it draws on.
+
+The board is one board, shown in both tabs: a reference added in either appears in both. The
+Colour Lab has it too (References, above Ask Claude); images and app parts added there start with
+Colour ticked, and Ask Claude uses the references marked for colour (or mood, or nothing ticked)
+while "Use references marked for colour" is on. App parts marked from the Colour Lab carry their
+colours, type and boxes, including every colour inside them. Code: `live-editor/references.ts`.
 
 **Keep** remembers a variation (with its part) for later; **Put it in the app** has Claude write it
 into the component's stylesheet (see Putting saves into the code below), keeping a record in

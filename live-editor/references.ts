@@ -74,11 +74,39 @@ export interface BoardOptions {
   endpoint: string;
   storagePrefix: string;
   say: (text: string, err?: boolean) => void;
-  /** Describe app elements for Claude: a short label and their styles and rules. */
-  describeParts: (els: Element[]) => { label: string; styles: string };
-  /** Called whenever the board changes (to re-render counts, say). */
+  /** Describe app elements for Claude: a short label and their styles and rules. Default: their colours, type and boxes. */
+  describeParts?: (els: Element[]) => { label: string; styles: string };
+  /** Called whenever the board changes (to re-render counts, say), here or in another tool. */
   onChange?: () => void;
+  /** What a reference added from this tool learns by default, e.g. ["colour"] in a colour tool. */
+  defaultAspects?: string[];
 }
+
+/** The plain description of app parts: what they are, their words, their colours, type and box. */
+export function describePartsPlainly(els: Element[]): { label: string; styles: string } {
+  const name = (el: Element) => `${el.tagName.toLowerCase()}${typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/)[0]}` : ""}`;
+  const keys = ["color", "background-color", "background-image", "border-color", "border-radius", "box-shadow", "font-family", "font-size", "font-weight", "letter-spacing"];
+  const lines = els.slice(0, 10).map((el) => {
+    const cs = getComputedStyle(el);
+    const words = (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+    const look = keys.map((k) => `${k}: ${cs.getPropertyValue(k)}`).filter((d) => !/: (none|normal|0px|rgba\(0, 0, 0, 0\))$/.test(d)).join("; ");
+    // The colours inside it too (a wrapper's own colour is often not what you see).
+    const inside = new Set<string>();
+    for (const node of [...el.querySelectorAll("*")].slice(0, 80)) {
+      const ns = getComputedStyle(node);
+      for (const k of ["color", "background-color", "border-top-color"]) {
+        const v = ns.getPropertyValue(k);
+        if (v && !/rgba\([^)]*,\s*0\)$/.test(v)) inside.add(v);
+      }
+    }
+    return `- ${name(el)}${words ? ` “${words}”` : ""}: ${look}${inside.size ? `; colours inside: ${[...inside].slice(0, 10).join(", ")}` : ""}`;
+  });
+  const words = els.map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4).map((w) => w.slice(0, 12)).join(" ");
+  return { label: `${els.length} part${els.length === 1 ? "" : "s"}${words ? ` · ${words}` : ` (${name(els[0])})`}`, styles: lines.join("\n") };
+}
+
+/** Sent when any tool's board changes, so the others on the page show the same references. */
+const CHANGED = "review-tool:references";
 
 const MAX = 6;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -150,9 +178,18 @@ export class ReferenceBoard {
   private host: HTMLElement | null = null;
   private root: ShadowRoot | null = null;
 
+  /** Tells this board's own change events apart from another tool's. */
+  private readonly self = Math.random().toString(36).slice(2);
+
   constructor(private readonly opts: BoardOptions) {
     this.key = `${opts.storagePrefix}:references`;
     this.refs = this.load();
+    window.addEventListener(CHANGED, (e) => {
+      if ((e as CustomEvent).detail === this.self) return;
+      this.refs = this.load();
+      this.render();
+      this.opts.onChange?.();
+    });
   }
 
   // ---- storage
@@ -177,6 +214,7 @@ export class ReferenceBoard {
     }
     this.render();
     this.opts.onChange?.();
+    window.dispatchEvent(new CustomEvent(CHANGED, { detail: this.self }));
   }
 
   get count() {
@@ -185,8 +223,6 @@ export class ReferenceBoard {
 
   /** The references a request should carry (only those passing `keep`), crops uploaded first. */
   async payload(keep: (aspects: string[]) => boolean = () => true): Promise<ReferencePayload[]> {
-    // Another tool on the page may have changed the board since this one loaded it.
-    if (!this.container) this.refs = this.load();
     const out: ReferencePayload[] = [];
     for (const ref of this.refs) {
       if (ref.kind === "app") {
@@ -210,7 +246,6 @@ export class ReferenceBoard {
 
   /** Everything checked across the board (for "N references marked for colour"). */
   marked(aspect: string): number {
-    if (!this.container) this.refs = this.load();
     return this.refs.filter((r) => !r.aspects.length || r.aspects.includes(aspect) || (r.kind === "image" && r.regions.some((g) => g.aspects.includes(aspect)))).length;
   }
 
@@ -255,7 +290,7 @@ export class ReferenceBoard {
         const keepPng = file.type === "image/png" || file.type === "image/gif";
         const [full, thumb] = await Promise.all([this.shrink(file, 2000, keepPng ? "image/png" : "image/jpeg"), this.shrink(file, 240)]);
         const id = await this.upload(full);
-        if (!this.refs.some((r) => r.kind === "image" && r.id === id)) this.refs.push({ kind: "image", id, thumb, aspects: [], note: "", regions: [] });
+        if (!this.refs.some((r) => r.kind === "image" && r.id === id)) this.refs.push({ kind: "image", id, thumb, aspects: [...(this.opts.defaultAspects ?? [])], note: "", regions: [] });
       } catch (e) {
         this.opts.say(`Couldn't add that image: ${(e as Error).message}`, true);
       } finally {
@@ -329,6 +364,8 @@ export class ReferenceBoard {
 
   private ensureOverlay(): ShadowRoot {
     if (this.root) return this.root;
+    const existing = document.getElementById("reference-editor");
+    if (existing?.shadowRoot) return (this.root = existing.shadowRoot);
     this.host = document.createElement("div");
     this.host.id = "reference-editor";
     this.host.setAttribute("data-review-tool", "");
@@ -509,8 +546,8 @@ export class ReferenceBoard {
         if (box.right - box.left < 8 || box.bottom - box.top < 8) return;
         const parts = this.partsIn(box);
         if (!parts.length) return this.opts.say("Nothing in that box: drag over the parts themselves.", true);
-        const { label, styles } = this.opts.describeParts(parts);
-        this.refs.push({ kind: "app", label, styles, aspects: [], note: "" });
+        const { label, styles } = (this.opts.describeParts ?? describePartsPlainly)(parts);
+        this.refs.push({ kind: "app", label, styles, aspects: [...(this.opts.defaultAspects ?? [])], note: "" });
         this.save();
         this.edit(this.refs.length - 1);
       };

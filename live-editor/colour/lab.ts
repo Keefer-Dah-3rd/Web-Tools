@@ -13,7 +13,7 @@
  */
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
 import type { PanelControl } from "../dock";
-import { ReferenceBoard } from "../references";
+import { BOARD_STYLE, ReferenceBoard } from "../references";
 import { HARMONIES, type Harmony, type Lch3, contrast, evenWheel, hexToLch, hueDelta, lchToHex, round, scaleAtHue, scaleFromSeed, turnScale } from "./palette";
 
 export interface ScaleSpec {
@@ -193,7 +193,13 @@ input[type=range] { width: 100%; accent-color: #ff8a65; }
 .foot { display: flex; gap: 6px; padding: 10px 12px 8px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .foot .primary { flex: 1; }
 .busy { opacity: .7; pointer-events: none; }
-${APPLIED_STYLE}`;
+${APPLIED_STYLE}
+${BOARD_STYLE}
+.drop { border-radius: 10px; transition: background .15s, outline-color .15s; outline: 2px dashed transparent; outline-offset: 4px; }
+label.add { font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); padding: 6px 9px; white-space: nowrap; }
+label.add:hover { background: rgba(255, 255, 255, 0.13); }
+.refs .ref:hover { border-color: #ff8a65; }
+.drop.over { outline-color: #ff8a65; background: rgba(255,138,101,.08); }`;
 
 const HTML = `
 <button class="pill" data-act="open" title="Colour Lab"><i></i>Colour Lab</button>
@@ -235,6 +241,15 @@ const HTML = `
       <h4>Contrast</h4>
       <button class="score" data-act="pairs"><b data-out="score"></b><span data-out="score-note"></span><em data-out="score-open">show</em></button>
       <div class="pairs" data-out="pairs" hidden></div>
+    </section>
+    <section class="drop" data-out="drop">
+      <h4>References <span data-out="refs-count"></span></h4>
+      <div class="refs" data-out="refs"></div>
+      <div class="row" style="margin-top:6px">
+        <label class="add">＋ Images<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden data-in="ref-files"></label>
+        <button data-act="mark-app" title="Click-drag over parts of the app whose colours you like">⬚ Mark part of the app</button>
+      </div>
+      <p class="note">Drop or paste (⌘V) images too. Click one to box the colours you like; they start with Colour ticked. Shared with the Design tab.</p>
     </section>
     <section>
       <h4>Ask Claude</h4>
@@ -334,8 +349,8 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
   let comparing = false;
   let showPairs = false;
   const writer = new CodeWriter(endpoint, storagePrefix, "colour");
-  /** The Design tab's reference board, read for the references marked for colour (or for everything). */
-  const refBoard = new ReferenceBoard({ endpoint, storagePrefix, say: (t, e) => say(t, e), describeParts: () => ({ label: "", styles: "" }) });
+  /** The reference board (shared with the Design tab): what Claude learns colour from. */
+  const refBoard = new ReferenceBoard({ endpoint, storagePrefix, say: (t, e) => say(t, e), defaultAspects: ["colour"], onChange: () => apply(false) });
   const forColour = (aspects: string[]) => !aspects.length || aspects.includes("colour") || aspects.includes("mood");
 
   // ---- the override sheet: unlayered :root rules beat the app's layered tokens
@@ -608,7 +623,8 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     out("kept").innerHTML = kept.map((c, i) => card(c, i, "kept")).join("");
     out("kept-count").textContent = kept.length ? String(kept.length) : "";
     const nRefs = refBoard.marked("colour");
-    out("refs-n").textContent = nRefs ? `(${nRefs})` : "(none yet, add them in Design)";
+    out("refs-n").textContent = nRefs ? `(${nRefs})` : "(none yet)";
+    out("refs-count").textContent = refBoard.count ? `${refBoard.count} of 6 · ${nRefs} for colour` : "";
     out("moods").innerHTML = site.moods.map((m) => `<button data-mood="${escapeHtml(m)}">${escapeHtml(m)}</button>`).join("");
     $<HTMLButtonElement>("[data-act=compare]").classList.toggle("on", comparing);
     out("applied").innerHTML = appliedRow(writer.last, escapeHtml);
@@ -697,6 +713,7 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     else if (act === "ask") void ask();
     else if (act === "save") void save();
     else if (act === "undo-apply") void undoApply();
+    else if (act === "mark-app") refBoard.markApp();
   });
 
   // Original: hold the button (or O) to see the app's own colours; a click toggles.
@@ -902,6 +919,43 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
     head.addEventListener("pointermove", move);
     head.addEventListener("pointerup", up);
   });
+
+  // ---- references: file picker, drop and paste (the board itself lives in references.ts)
+  refBoard.mount(out("refs"));
+  input("ref-files").addEventListener("change", (e) => {
+    const box = e.target as HTMLInputElement;
+    void refBoard.addFiles([...(box.files ?? [])]);
+    box.value = "";
+  });
+  const dropZone = out("drop");
+  panel.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault();
+    dropZone.classList.add("over");
+  });
+  panel.addEventListener("dragleave", (e) => {
+    if (!panel.contains(e.relatedTarget as Node)) dropZone.classList.remove("over");
+  });
+  panel.addEventListener("drop", (e) => {
+    dropZone.classList.remove("over");
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    void refBoard.addFiles([...e.dataTransfer.files]);
+  });
+  // ⌘V an image while the lab is open (not into one of the app's own fields).
+  document.addEventListener(
+    "paste",
+    (e) => {
+      if (panel.hidden) return;
+      const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()!).filter(Boolean);
+      if (!files.length) return;
+      const inApp = e.composedPath().some((n) => (n instanceof HTMLInputElement || n instanceof HTMLTextAreaElement || (n instanceof HTMLElement && n.isContentEditable)) && !(n instanceof Node && host.contains(n)) && (n as Node).getRootNode() !== root);
+      if (inApp) return;
+      e.preventDefault();
+      void refBoard.addFiles(files);
+    },
+    true,
+  );
 
   // Keep app shortcuts out of the lab's text fields.
   root.addEventListener("keydown", (e) => e.stopPropagation());
