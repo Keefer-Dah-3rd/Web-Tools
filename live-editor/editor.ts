@@ -1133,6 +1133,11 @@ export function mountEditor(options: EditorOptions | string): void {
     render();
   };
 
+  /** The element's font size as it is (any hover preview taken off first, so a step isn't taken twice). */
+  const sizeNow = (el: Element) => {
+    peekSheet.textContent = "";
+    return parseFloat(getComputedStyle(el).fontSize);
+  };
   const setSize = (px: number) => change((e) => (e.fontSize = Math.max(6, Math.round(px * 2) / 2)));
   const setScale = (scale: number) => change((e) => (e.scale = Math.min(2.5, Math.max(0.3, Math.round(scale * 100) / 100))));
   const setColour = (hex: string) => {
@@ -1146,13 +1151,23 @@ export function mountEditor(options: EditorOptions | string): void {
     const hovered = event.target as HTMLElement;
     const swatch = hovered.closest<HTMLElement>("[data-colour]");
     const typeKey = hovered.closest<HTMLElement>("[data-type]")?.dataset.type;
+    const sizeAct = hovered.closest<HTMLElement>("[data-act=smaller], [data-act=bigger], [data-act=size-reset]")?.dataset.act;
     window.clearTimeout(peekOff);
-    if (!swatch && !(typeKey && TYPE[typeKey])) {
+    if (!swatch && !(typeKey && TYPE[typeKey]) && !sizeAct) {
       if (peekSheet.textContent) peekOff = window.setTimeout(() => (peekSheet.textContent = ""), 80);
       return;
     }
     if (!picked || editing) return;
-    const look = swatch ? `${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important;` : TYPE[typeKey!].css.replace(/;/g, " !important;");
+    let look: string;
+    if (swatch) look = `${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important;`;
+    else if (typeKey) look = TYPE[typeKey].css.replace(/;/g, " !important;");
+    else {
+      // The size a click would give: one step from the size it has now (read without the preview).
+      const now = sizeNow(picked);
+      const was = parseFloat(editFor(picked, false)?.was.fontSize ?? "") || now;
+      const px = sizeAct === "smaller" ? now / 1.08 : sizeAct === "bigger" ? now * 1.08 : was;
+      look = `font-size: ${Math.max(6, Math.round(px * 2) / 2)}px !important;`;
+    }
     peekSheet.textContent = `${selectorOf(picked)} { ${look} }`;
   });
   bar.addEventListener("pointerleave", () => {
@@ -1324,9 +1339,12 @@ export function mountEditor(options: EditorOptions | string): void {
     else if (act === "text") {
       if (!wasTyping) startTyping();
     } else if (act === "text-reset") change((e) => (e.html = e.newText = undefined));
-    else if (act === "smaller" && picked) setSize(parseFloat(getComputedStyle(picked).fontSize) / 1.08);
-    else if (act === "bigger" && picked) setSize(parseFloat(getComputedStyle(picked).fontSize) * 1.08);
-    else if (act === "size-reset") change((e) => (e.fontSize = undefined));
+    else if (act === "smaller" && picked) setSize(sizeNow(picked) / 1.08);
+    else if (act === "bigger" && picked) setSize(sizeNow(picked) * 1.08);
+    else if (act === "size-reset") {
+      peekSheet.textContent = "";
+      change((e) => (e.fontSize = undefined));
+    }
     else if (act === "colour-reset") change((e) => (target === "color" ? (e.color = undefined) : (e.fill = undefined)));
     else if (act === "shrink") setScale((editFor(picked!, false)?.scale ?? 1) - 0.05);
     else if (act === "grow") setScale((editFor(picked!, false)?.scale ?? 1) + 0.05);
