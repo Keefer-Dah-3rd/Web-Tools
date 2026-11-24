@@ -14,7 +14,8 @@
     "demo": "vite demo --port 5190",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
-    "live": "node live-editor/server.mjs live-editor/sites/keefedesign.json"
+    "live": "node live-editor/server.mjs live-editor/sites/keefedesign.json",
+    "mibbit": "node live-editor/server.mjs live-editor/sites/mibbit.json"
   },
   "devDependencies": {
     "esbuild": "0.25.12",

@@ -167,7 +167,9 @@ function askCli(cfg, system, prompt, schema) {
     let err = "";
     let child;
     try {
-      child = spawn(claudeBin(), args, { cwd: tmpdir(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+      // Never an API key: rewrites use the Claude sign-in, so they can't bill Console credits.
+      const { ANTHROPIC_API_KEY: _key, ...env } = process.env;
+      child = spawn(claudeBin(), args, { cwd: tmpdir(), env, stdio: ["ignore", "pipe", "pipe"] });
     } catch (e) {
       return resolve({ ok: false, auth: false, error: `Couldn't start Claude Code: ${e.message}` });
     }

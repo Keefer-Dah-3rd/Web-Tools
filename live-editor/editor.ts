@@ -303,7 +303,7 @@ const HTML = `
         </div>
       </div>
       <div style="margin-top:12px">
-        <h4>Type style <span>portfolio system</span></h4>
+        <h4>Type style <span>this site's styles</span></h4>
         <div class="types"></div>
       </div>
       <div style="margin-top:12px">
@@ -347,9 +347,20 @@ const HTML = `
 </div>
 `;
 
+/** Any CSS colour as #RRGGBB. Modern colours (oklab(), color-mix() results) go through a 1px canvas. */
+let paint: CanvasRenderingContext2D | null | undefined;
 const rgbToHex = (value: string): string => {
   const m = value.match(/rgba?\(([^)]+)\)/);
-  if (!m) return value;
+  if (!m) {
+    paint ??= document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    if (!paint) return value;
+    paint.clearRect(0, 0, 1, 1);
+    paint.fillStyle = "#000";
+    paint.fillStyle = value;
+    paint.fillRect(0, 0, 1, 1);
+    const [r, g, b] = paint.getImageData(0, 0, 1, 1).data;
+    return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+  }
   const [r, g, b] = m[1].split(/[,\s/]+/).map(Number);
   return `#${[r, g, b].map((n) => Math.round(n).toString(16).padStart(2, "0")).join("")}`.toUpperCase();
 };
@@ -483,16 +494,46 @@ export function mountEditor(options: EditorOptions | string): void {
   };
   const CSS_ESCAPE = (s: string) => (typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(s) : s);
 
-  /** The JSX file and line that wrote this element (React's dev build records it). */
-  const sourceOf = (el: Element): string | undefined => {
-    const key = Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
-    let fiber = key ? (el as unknown as Record<string, { _debugSource?: { fileName: string; lineNumber: number }; return?: unknown }>)[key] : undefined;
-    for (let i = 0; fiber && i < 6; i++) {
-      const src = fiber._debugSource;
-      if (src) return `${sourceRoot ? src.fileName.replace(sourceRoot, "") : src.fileName}:${src.lineNumber}`;
-      fiber = fiber.return as typeof fiber;
+  /**
+   * The JSX file and line that wrote this element. React 18's dev build records it exactly
+   * (_debugSource). React 19 dropped that, so there we read the file from the stack React keeps
+   * for each element when it has one (_debugStack; its line is the compiled one, so it's marked
+   * "~"), and always the components it sits in, nearest first, which is enough to find the JSX.
+   */
+  type Fiber = {
+    _debugSource?: { fileName: string; lineNumber: number };
+    _debugStack?: { stack?: string };
+    type?: unknown;
+    return?: unknown;
+  };
+  const trimSource = (file: string) => (sourceRoot ? file.replace(sourceRoot, "") : file);
+  const fileFromStack = (stack: string): string | undefined => {
+    for (const line of stack.split("\n").slice(1)) {
+      const m = line.match(/\(?((?:https?:\/\/[^/\s]+)?\/[^\s()]+?\.[jt]sx?)(?:\?[^:\s()]*)?:(\d+):\d+\)?\s*$/);
+      if (!m || /node_modules|\/@fs\/|\.vite\/deps|react-dom|jsx-dev-runtime/.test(m[1])) continue;
+      const path = m[1].replace(/^https?:\/\/[^/]+/, "").replace(/^\/+/, "");
+      return `${trimSource(path)}:~${m[2]}`;
     }
     return undefined;
+  };
+  const sourceOf = (el: Element): string | undefined => {
+    const key = Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
+    let fiber = key ? (el as unknown as Record<string, Fiber>)[key] : undefined;
+    let file: string | undefined;
+    const components: string[] = [];
+    for (let i = 0; fiber && i < 14; i++) {
+      const src = fiber._debugSource;
+      if (src) return `${trimSource(src.fileName)}:${src.lineNumber}`;
+      // Only the element's own stack points into the component that wrote it; a component's
+      // stack points at its parent. React also stops keeping stacks on busy pages (UnknownOwner).
+      if (i === 0 && fiber._debugStack?.stack) file = fileFromStack(fiber._debugStack.stack);
+      const t = fiber.type as { displayName?: string; name?: string } | string | undefined;
+      const name = t && typeof t !== "string" ? t.displayName || t.name : undefined;
+      if (name && /^[A-Z]/.test(name) && components.length < 3) components.push(name);
+      fiber = fiber.return as Fiber | undefined;
+    }
+    if (!file && !components.length) return undefined;
+    return [file, components.length ? `in ${components.join(" < ")}` : ""].filter(Boolean).join(" ");
   };
 
   const nameOf = (el: Element): string => {
@@ -586,6 +627,9 @@ export function mountEditor(options: EditorOptions | string): void {
     editing.style.outline = "2px solid #ffb02e";
     editing.style.outlineOffset = "3px";
     editing.style.cursor = "text";
+    // App UIs often turn text selection off (user-select: none); typing needs it back on.
+    editing.style.userSelect = "text";
+    editing.style.setProperty("-webkit-user-select", "text");
     editing.focus();
     let range: Range | null = at ? caretAt(at.x, at.y) : null;
     if (!range || !editing.contains(range.startContainer)) {
@@ -608,6 +652,8 @@ export function mountEditor(options: EditorOptions | string): void {
     el.style.outline = "";
     el.style.outlineOffset = "";
     el.style.cursor = "";
+    el.style.userSelect = "";
+    el.style.removeProperty("-webkit-user-select");
     if (!el.getAttribute("style")) el.removeAttribute("style");
     window.getSelection()?.removeAllRanges();
     if (!keep || el.innerHTML === editingWas) {

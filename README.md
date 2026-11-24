@@ -171,3 +171,20 @@ click the bookmark again to carry on.
 
 To add another site, copy `sites/keefedesign.ts` and `.json`, change `origins` and the entry,
 and run `node live-editor/server.mjs live-editor/sites/<site>.json`.
+
+### Mibbit (local app)
+
+Mibbit's dev server runs in Docker, where Claude Code can't reach your Mac, so it uses the live
+editor's helper instead of the Vite plugin:
+
+```bash
+npm run mibbit
+```
+
+Then open <http://localhost:5173/?tools>. The app's dev-only loader (`web/src/dev/designTools.ts`
+in the Mibbit repo) pulls the toolbar from the helper and keeps it on in that browser;
+`?tools=off` hides it. The Type style and colour buttons are Mibbit's own (fonts and tokens from
+`web/src/styles/tokens.css`), rewrites follow `sites/mibbit-brief.md` (Mibbit's voice), and saves go
+to `live-editor/edits/mibbit/<page>.json`. Mibbit is React 19, which no longer records JSX lines,
+so each saved edit names its file when React kept it (compiled line, marked `~`) and always the
+components it sits in, e.g. `in TrackTab < CanvasRow2 < SongCanvas`.
