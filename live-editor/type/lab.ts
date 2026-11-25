@@ -521,9 +521,10 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
   function renderPicker() {
     if (!picking) return;
     const current = state.roles[picking].family;
-    picker.querySelector<HTMLElement>("[data-out=kinds]")!.innerHTML = KINDS.map((k) => `<button data-kind="${k.id}" class="${kind === k.id ? "on" : ""}">${k.label}</button>`).join("");
+    picker.querySelector<HTMLElement>("[data-out=kinds]")!.innerHTML = KINDS.map((k) => `<button data-kind="${k.id}" class="${kind === k.id && !query.trim() ? "on" : ""}">${k.label}</button>`).join("");
     const q = query.trim().toLowerCase();
-    const matches = CATALOGUE.filter((f) => (kind === "all" || f.kind === kind) && (!q || f.family.toLowerCase().includes(q)));
+    // A search looks through every kind: a font shouldn't hide behind a filter you forgot was on.
+    const matches = CATALOGUE.filter((f) => (q ? f.family.toLowerCase().includes(q) : kind === "all" || f.kind === kind));
     const exact = q && CATALOGUE.some((f) => f.family.toLowerCase() === q);
     const asDesigned = firstFamily(orig[picking] ?? "");
     const scrolled = fontsBox.scrollTop;
@@ -782,6 +783,8 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
     const k = t.closest<HTMLElement>("[data-kind]")?.dataset.kind;
     if (k) {
       kind = k as FontKind | "all";
+      query = "";
+      searchIn.value = "";
       fontsBox.scrollTop = 0;
       return renderPicker();
     }
