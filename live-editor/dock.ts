@@ -11,8 +11,8 @@ import { createSplit } from "./split";
  * at the app; press it again (or click the dock's dot) to bring them back as they were.
  *
  * Docked: every tool opens in the same slot, one at a time (opening one folds the others).
- * Side by side (the default, see split.ts) that slot is a pane on the right of the window and the
- * app shrinks to the rest, with a divider to drag; floating, it sits over the page on the left.
+ * Side by side (the default, see split.ts) that slot is a pane on the left of the window and the
+ * app moves over into the rest, with a divider to drag; floating, it sits over the page on the left.
  *
  * ⌘Z / ⌘⇧Z go to the tool you last used (clicked in, or picking on the page with); when you last
  * clicked the app itself, they're the app's own undo and redo, untouched.
@@ -44,6 +44,8 @@ export interface DockOptions {
   storagePrefix: string;
   /** Page rules sized to the viewport (`width: 100vw`) to size to the app when side by side. */
   viewportWide?: string[];
+  /** Full-window dialogs and scrims to keep in the app's half when side by side. */
+  viewportCentred?: string[];
 }
 
 const STYLE = `
@@ -66,6 +68,7 @@ button:focus-visible { outline: 2px solid #3ea0ff; outline-offset: 1px; }
 .split-divider:hover::after, .split-divider.dragging::after { background: #3ea0ff; }
 .split-divider:focus { outline: none; }
 .split-divider[hidden] { display: none; }
+:host([data-split]) .dock { left: calc(var(--tools-split-pane-w, 0px) + 8px) !important; }
 .sep { width: 1px; height: 14px; background: rgba(255, 255, 255, 0.16); margin: 0 2px; }
 kbd { font: 600 9.5px ui-monospace, Menlo, monospace; color: #8e9aab; }
 `;
@@ -126,7 +129,7 @@ export function mountDock(options: DockOptions): void {
   </div>`;
   const dock = root.querySelector<HTMLElement>(".dock")!;
 
-  const split = createSplit({ storagePrefix: options.storagePrefix, viewportWide: options.viewportWide, toolHosts: () => toolHosts() });
+  const split = createSplit({ storagePrefix: options.storagePrefix, viewportWide: options.viewportWide, viewportCentred: options.viewportCentred, toolHosts: () => toolHosts() });
   root.appendChild(split.divider);
   const splitButton = root.querySelector<HTMLElement>("[data-act=split]")!;
 
@@ -164,6 +167,8 @@ export function mountDock(options: DockOptions): void {
     splitButton.textContent = side ? "◧ Side" : "❐ Float";
     splitButton.classList.toggle("on", side);
     split.sync(!hidden && items.some((t) => t.control.isOpen()));
+    // Side by side, the dock moves over with the app (it sits in the app's bottom bar).
+    host.toggleAttribute("data-split", split.active());
   };
 
   const toggle = (i: number) => {

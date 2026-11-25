@@ -1,16 +1,18 @@
 /**
- * Side by side: the open tool gets its own full-height pane on the right of the window, and the
- * page shrinks to the space on the left, so nothing of the app sits under a tool.
+ * Side by side: the open tool gets its own full-height pane on the left of the window, and the
+ * page shrinks to the space on the right, so nothing of the app sits under a tool.
  *
  * Drag the divider between them to give either side more room (double-click it for the default
  * split). The split is kept as a share of the window, so it follows the window as it gets wider
  * or narrower; below MIN_APP + MIN_PANE the window is too small to split and the tool floats over
  * the page as before.
  *
- * How the page is narrowed: its <body> gets the app's width, the site's own full-viewport rules
- * (`width: 100vw`) are pointed at that width, and window.innerWidth reports it too (apps clamp
- * popovers to it), with a resize event so the app re-measures. The page stays at x = 0, so its
- * own fixed-position popovers still line up with what they point at.
+ * How the page is moved over: its <body> gets a left margin the width of the pane and the app's
+ * width, the site's own full-viewport rules (`width: 100vw`) are pointed at that width, and a
+ * resize event lets the app re-measure. Nothing becomes a new containing block, so the app's
+ * popovers, tooltips and flying bits (placed from getBoundingClientRect) still line up with what
+ * they point at. Full-window dialogs and scrims the site lists (`viewportCentred`) start at the
+ * pane's edge instead, so they centre in the app's half.
  */
 
 const MIN_PANE = 300;
@@ -22,7 +24,7 @@ const PANE_STYLE_ID = "tools-split-pane";
 /** CSS for a tool's shadow root: its panel fills the pane. */
 const PANE_CSS = `
 :host([data-split]) .panel, :host([data-split]) .bar {
-  left: auto !important; right: 0 !important; top: 0 !important; bottom: 0 !important;
+  left: 0 !important; right: auto !important; top: 0 !important; bottom: 0 !important;
   width: var(--tools-split-pane-w, 360px) !important; height: 100vh !important; max-height: none !important;
   border-radius: 0 !important; border-width: 0 !important; box-shadow: none !important;
   background: rgb(22, 25, 31) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
@@ -36,11 +38,15 @@ export interface SplitOptions {
   storagePrefix: string;
   /** Page rules that size things to the viewport (e.g. ".app-shell"), to size to the app instead. */
   viewportWide?: string[];
+  /** Full-window dialogs and scrims (`position: fixed; inset: 0`) to keep in the app's half. */
+  viewportCentred?: string[];
   /** Tool hosts on the page (shadow hosts) that hold the panels. */
   toolHosts: () => HTMLElement[];
 }
 
 export interface Split {
+  /** True while the page is split (a tool open side by side). */
+  active(): boolean;
   /** Turn the split on or off for the current state: a tool open, tools shown, side-by-side chosen. */
   sync(toolOpen: boolean): void;
   /** Side by side (true) or floating over the page (false). */
@@ -75,23 +81,7 @@ export function createSplit(options: SplitOptions): Split {
   let wantOpen = false;
   let paneW = 0;
 
-  // window.innerWidth as the browser reports it, before we narrow it.
-  const own = Object.getOwnPropertyDescriptor(window, "innerWidth");
-  const realWidth = (): number => (own?.get ? (own.get.call(window) as number) : document.documentElement.clientWidth);
-  let patched = false;
-  const patchInnerWidth = (on: boolean) => {
-    try {
-      if (on && !patched) {
-        Object.defineProperty(window, "innerWidth", { configurable: true, get: () => realWidth() - (active ? paneW : 0) });
-        patched = true;
-      } else if (!on && patched && own) {
-        Object.defineProperty(window, "innerWidth", own);
-        patched = false;
-      }
-    } catch {
-      /* the page still splits; popovers just clamp to the full window */
-    }
-  };
+  const realWidth = (): number => document.documentElement.clientWidth || window.innerWidth;
 
   const pageStyle = () => {
     let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -103,11 +93,14 @@ export function createSplit(options: SplitOptions): Split {
     }
     return el;
   };
-  const wide = (options.viewportWide ?? []).map((s) => `html[data-tools-split] ${s}`).join(", ");
+  const sel = (list?: string[]) => (list ?? []).map((s) => `html[data-tools-split] ${s}`).join(", ");
+  const wide = sel(options.viewportWide);
+  const centred = sel(options.viewportCentred);
   const PAGE_CSS = `
 html[data-tools-split] { overflow: hidden !important; }
-html[data-tools-split] body { width: var(--tools-split-app-w) !important; min-width: 0 !important; max-width: var(--tools-split-app-w) !important; overflow: hidden !important; }
+html[data-tools-split] body { margin-left: var(--tools-split-pane-w) !important; width: var(--tools-split-app-w) !important; min-width: 0 !important; max-width: var(--tools-split-app-w) !important; overflow: hidden !important; }
 ${wide ? `${wide} { width: var(--tools-split-app-w) !important; max-width: var(--tools-split-app-w) !important; }` : ""}
+${centred ? `${centred} { left: var(--tools-split-pane-w) !important; }` : ""}
 `;
 
   const dressPanes = () => {
@@ -159,16 +152,14 @@ ${wide ? `${wide} { width: var(--tools-split-app-w) !important; max-width: var(-
       html.style.setProperty("--tools-split-pane-w", `${paneW}px`);
       html.style.setProperty("--tools-split-app-w", `${vw - paneW}px`);
       html.setAttribute("data-tools-split", "");
-      divider.style.left = `${vw - paneW - 4}px`;
+      divider.style.left = `${paneW - 4}px`;
       divider.setAttribute("aria-valuenow", String(Math.round((paneW / vw) * 100)));
       divider.hidden = false;
-      patchInnerWidth(true);
     } else {
       html.removeAttribute("data-tools-split");
       html.style.removeProperty("--tools-split-pane-w");
       html.style.removeProperty("--tools-split-app-w");
       divider.hidden = true;
-      patchInnerWidth(false);
     }
     dressPanes();
     announce();
@@ -187,7 +178,7 @@ ${wide ? `${wide} { width: var(--tools-split-app-w) !important; max-width: var(-
     let frame = 0;
     const move = (ev: PointerEvent) => {
       const vw = realWidth();
-      share = Math.min(Math.max((vw - ev.clientX) / vw, MIN_PANE / vw), (vw - MIN_APP) / vw);
+      share = Math.min(Math.max(ev.clientX / vw, MIN_PANE / vw), (vw - MIN_APP) / vw);
       if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(); });
     };
     const up = (ev: PointerEvent) => {
@@ -212,8 +203,8 @@ ${wide ? `${wide} { width: var(--tools-split-app-w) !important; max-width: var(-
   });
   divider.addEventListener("keydown", (e) => {
     const step = e.shiftKey ? 0.1 : 0.02;
-    if (e.key === "ArrowLeft") share += step;
-    else if (e.key === "ArrowRight") share -= step;
+    if (e.key === "ArrowRight") share += step;
+    else if (e.key === "ArrowLeft") share -= step;
     else return;
     e.preventDefault();
     const vw = realWidth();
@@ -243,5 +234,6 @@ ${wide ? `${wide} { width: var(--tools-split-app-w) !important; max-width: var(-
       apply();
     },
     sideBySide: () => side,
+    active: () => active,
   };
 }

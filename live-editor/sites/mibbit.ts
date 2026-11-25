@@ -79,6 +79,11 @@ mountDock({
   storagePrefix: "mibbit-tools",
   // Side by side, these full-window rules (width: 100vw) size to the app's half instead.
   viewportWide: [".app-shell", ".prompt-bar--oled"],
+  // ...and its dialogs and scrims centre in the app's half, not under the tools.
+  viewportCentred: [
+    ".auth-gate", ".pad-sheet-backdrop", ".export-dialog", ".about-dialog", ".mibbles-menu", ".settings-dialog",
+    ".app-crash", ".rotate-hint", ".people", ".onboarding-scrim", ".mobile-gate", ".mxp-scrim",
+  ],
   tools: [
     ...(colour ? [{ label: "Colour", icon: "◐", code: "KeyC", host: "colour-lab", control: colour }] : []),
     ...(design ? [{ label: "Design", icon: "✦", code: "KeyD", host: "design-generator", control: design }] : []),
