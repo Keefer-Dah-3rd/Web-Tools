@@ -580,6 +580,78 @@ export function handleDesignSave(cfg, req, res) {
   });
 }
 
+// ---- Texture Lab (texture/lab.ts): three surface finishes from a description.
+
+const TEXTURE_SCHEMA = {
+  type: "object",
+  properties: {
+    variants: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: Object.fromEntries(
+          ["name", "why", "raised", "pressed", "flush", "screen", "sheenLight", "sheenSoft", "glimmer", "overlay", "overlaySize"].map((k) => [k, { type: "string" }])
+            .concat([["body", { type: "string", enum: ["flat", "soft", "keep"] }], ["sheen", { type: "string", enum: ["remove", "satin", "keep"] }], ["knurl", { type: "string", enum: ["remove", "keep"] }]]),
+        ),
+        required: ["name", "why", "raised", "pressed", "flush", "screen", "sheenLight", "sheenSoft", "glimmer", "overlay", "overlaySize", "body", "sheen", "knurl"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["variants"],
+  additionalProperties: false,
+};
+
+function textureSystem(cfg) {
+  const parts = [readFileSync(join(HERE, "texture", "brief.md"), "utf8")];
+  let room = 20000;
+  for (const file of cfg.designFacts ?? []) {
+    if (!existsSync(file) || room <= 0) continue;
+    const text = readFileSync(file, "utf8").slice(0, room);
+    room -= text.length;
+    parts.push(`## Design facts: ${file.split("/").slice(-2).join("/")}\n\n${text}`);
+  }
+  return parts.join("\n\n");
+}
+
+function texturePrompt(req) {
+  const raw = (v, max) => String(v ?? "").slice(0, max);
+  const roles = req.roles && typeof req.roles === "object" ? Object.values(req.roles).map((v) => `- ${raw(v, 320)}`) : [];
+  return [
+    "## What the designer described",
+    `"${clip(req.ask, 600)}"`,
+    "",
+    "## The shared roles now",
+    ...roles,
+    "",
+    "## The surfaces (their colours stay)",
+    raw(req.surfaces, 600),
+    "",
+    "## Textured rules on screen now (kind: count, then samples)",
+    raw(req.inventory, 9000),
+    list(req.avoid, 9, 240).length ? ["", "## Already made (go somewhere different)", ...list(req.avoid, 9, 240).map((a) => `- ${a}`)].join("\n") : "",
+    "",
+    "Write 3 textures.",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+/** POST <endpoint>/texture: a described finish in, three textures (recipe language) out. */
+export function handleTexture(cfg, req, res) {
+  jsonBody(req, res, 200_000, async (data, reply) => {
+    if (!clip(data.ask, 600)) return reply(400, { error: "Describe a texture first." });
+    const system = textureSystem(cfg);
+    const prompt = texturePrompt(data);
+    const cli = await askCli(cfg, system, prompt, TEXTURE_SCHEMA);
+    if (cli.ok) return reply(200, { ...cli.answer, via: "Claude Code" });
+    if (!cfg.sessionFallback) return reply(502, { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error });
+    const session = await askSession(cfg, system, prompt, TEXTURE_SCHEMA);
+    if (session.ok) return reply(200, { ...session.answer, via: "Claude session" });
+    reply(502, { error: `${cli.error} No Claude session answered either.` });
+  });
+}
+
 // ---- writing saves into the code (apply.mjs)
 
 /** POST <endpoint>/apply {kind: "palette" | "design", name}: write a save into the code and commit it. */

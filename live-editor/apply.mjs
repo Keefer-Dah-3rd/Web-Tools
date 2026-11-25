@@ -283,7 +283,7 @@ const guardText = (cfg, save) => {
   return `\n\nLeave alone:\n${lines.join("\n")}`;
 };
 
-const designPrompt = (save, json) => save.target?.scope === "app" ? appDesignPrompt(json) : `You are applying a design variation that the designer tried live in the running app and chose to keep. Here is the save:
+const designPrompt = (save, json) => save.texture ? texturePrompt(save, json) : save.target?.scope === "app" ? appDesignPrompt(json) : `You are applying a design variation that the designer tried live in the running app and chose to keep. Here is the save:
 
 \`\`\`json
 ${json}
@@ -315,6 +315,23 @@ The CSS that was tried is nested under :root (& is :root). Make the app look exa
 4. Change only files under web/src/styles/. If something can't be written without a markup change, leave it and say so.
 
 When done, reply with one or two plain sentences saying what changed and where.`;
+
+const texturePrompt = (save, json) => `You are applying a surface texture (a material finish) that the designer tried live across the running app with the Texture Lab and chose to keep. Here is the save:
+
+\`\`\`json
+${json}
+\`\`\`
+
+What it is: "${save.name}": ${save.why}
+
+The colours stay exactly as they are; only the finish changes. Make the app look as it did with the texture on:
+1. "tokens" are the shared shadow and sheen roles (--shadow-neu-raised, --shadow-neu-pressed, --shadow-neu-flush, --screen-edge-shadow, --glass-sheen-*, --glimmer-color). Change each where it is defined in web/src/styles/tokens.css to the value given. Keep the color-mix recipes; tidy numbers (round to whole px and whole %) but don't change the look. Update the comments above them so they describe the new finish.
+2. If "overlay" is given, add --texture-overlay and --texture-overlay-size next to those roles in tokens.css, with a short comment naming the finish. The overlay may be long data: SVG images; keep them exactly.
+3. Each entry in "rules" is one existing rule: its file (relative to the repo; if it isn't a real file, Grep web/src/styles for the selector), its cascade layer, any @media around it, its selector, what its background and box-shadow were ("was"), and the declarations it now needs ("now"). Change that rule in place so it has those declarations instead of the old background / box-shadow: replace the gradient layers in place, don't append an override. When "now" sets background-image/-color/-size/-position/-repeat, write them as longhands (or one background shorthand that says the same thing). var(--texture-overlay) and var(--texture-overlay-size) refer to the tokens from step 2.
+4. Don't change any rule not listed, any colour token, any palette step, or any TSX. Keep each file's style and comments; update a comment if it now says something untrue (for example one that describes the old gloss).
+5. Change only files under web/src/styles/. If a rule can't be found, skip it and say so.
+
+When done, reply with one or two plain sentences saying what changed and how many rules, and anything you skipped.`;
 
 const pagePrompt = (save, json) => `You are applying edits the designer made in the running app with the in-browser toolbar. Here is the save:
 

@@ -1,7 +1,8 @@
 /**
  * The dock: one small launcher for the design tools, out of the app's way, with shortcuts.
  *
- *   ⌥E  the edit toolbar      ⌥C  Colour Lab      ⌥D  Design Generator      ⌥H  hide every tool
+ *   ⌥E  the edit toolbar      ⌥C  Colour Lab      ⌥D  Design Generator      ⌥T  Texture Lab
+ *   ⌥H  hide every tool
  *
  * Shortcuts use Option (Alt) so they don't collide with an app's own single keys; they match by
  * physical key (⌥C types "ç" on a Mac). ⌥H hides every tool, outlines and all, for a clean look

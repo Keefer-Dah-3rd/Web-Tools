@@ -14,6 +14,7 @@ import { mountEditor } from "../editor";
 import { MIBBIT_NAMES, MIBBIT_TYPES, mibbitSwatches } from "../../page-editor/presets/mibbit";
 import { mountColourLab } from "../colour/lab";
 import { mountDesignGenerator } from "../design/generator";
+import { mountTextureLab } from "../texture/lab";
 import { mountDock } from "../dock";
 import { MIBBIT_RULES } from "./mibbit-rules";
 import { MIBBIT_DESIGN } from "./mibbit-design";
@@ -52,11 +53,33 @@ const design = mountDesignGenerator({
   storagePrefix: "mibbit-tools",
 });
 
-// One launcher in Mibbit's bottom bar (empty on the left) instead of floating pills; ⌥E ⌥C ⌥D, ⌥H hides all.
+// The Texture Lab: swap the gloss and skeuomorphic finish for another material, across the app.
+const texture = mountTextureLab({
+  rules: MIBBIT_RULES,
+  launcher: false,
+  site: {
+    inks: { light: "--warm-50", dark: "--warm-999" },
+    asks: [
+      "Worn rubber, no shine",
+      "Bead-blasted aluminium",
+      "Chalky matte plastic",
+      "Frosted translucent case",
+      "Old Braun hi-fi",
+      "Risograph print",
+      "Anodised, but calmer",
+      "Like the OP-1's screen art",
+    ],
+  },
+  endpoint: window.__pageEditorLive?.endpoint ?? "http://127.0.0.1:5198/__page-editor",
+  storagePrefix: "mibbit-tools",
+});
+
+// One launcher in Mibbit's bottom bar (empty on the left) instead of floating pills; ⌥E ⌥C ⌥D ⌥T, ⌥H hides all.
 mountDock({
   storagePrefix: "mibbit-tools",
   tools: [
     ...(colour ? [{ label: "Colour", icon: "◐", code: "KeyC", host: "colour-lab", control: colour }] : []),
     ...(design ? [{ label: "Design", icon: "✦", code: "KeyD", host: "design-generator", control: design }] : []),
+    ...(texture ? [{ label: "Texture", icon: "◍", code: "KeyT", host: "texture-lab", control: texture }] : []),
   ],
 });
