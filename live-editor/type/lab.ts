@@ -59,6 +59,8 @@ export interface TypeSite {
   /** The app's name, for the font names written into its code ("Mibbit Display"). */
   appName: string;
   presets: TypeStyle[];
+  /** Quick picks for "Ask Claude". */
+  asks?: string[];
 }
 
 export interface TypeOptions {
@@ -124,6 +126,20 @@ button:focus-visible, input:focus-visible { outline: 2px solid ${ACCENT}; outlin
 .chips button { padding: 4px 9px; font-size: 11px; border-radius: 999px; position: relative; }
 .chips button .x { margin-left: 4px; color: #8e9aab; }
 .chips button .x:hover { color: #ff9a8a; }
+textarea { font: 500 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; color: #f3f6fa; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 6px 8px; width: 100%; resize: vertical; }
+textarea:focus-visible { outline: 2px solid ${ACCENT}; outline-offset: 2px; }
+.sugg { display: grid; gap: 6px; }
+.card { display: grid; gap: 4px; padding: 8px 9px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); cursor: pointer; position: relative; }
+.card:hover, .card:focus-visible { border-color: color-mix(in srgb, ${ACCENT} 60%, transparent); outline: none; }
+.card.on { border-color: ${ACCENT}; background: color-mix(in srgb, ${ACCENT} 12%, transparent); }
+.card .name { font-weight: 700; color: #f3f6fa; display: flex; gap: 6px; align-items: center; padding-right: 18px; }
+.card .name em { margin-left: auto; font-style: normal; font-size: 9.5px; font-weight: 700; color: ${ACCENT}; letter-spacing: .06em; text-transform: uppercase; }
+.card .fams { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; align-items: baseline; }
+.card .fams small { color: #7e8a9a; font-size: 10px; font-weight: 600; }
+.card .fams span { font-size: 15px; color: #f6f1e7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card p { margin: 0; color: #9aa6b6; font-size: 10.5px; line-height: 1.35; }
+.card .x { position: absolute; top: 4px; right: 4px; padding: 0 5px; border: 0; background: none; color: #7e8a9a; font-size: 12px; }
+.card .x:hover { color: #ff9a8a; }
 input[type=text] { font: inherit; color: #f3f6fa; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 6px 8px; width: 100%; min-width: 0; }
 .roles { display: grid; gap: 8px; }
 .role { border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); padding: 8px; display: grid; gap: 6px; }
@@ -169,6 +185,13 @@ const HTML = `
       <h4>Type styles <span data-out="style-name"></span></h4>
       <div class="chips" data-out="styles"></div>
       <div class="row" style="margin-top:8px;flex-wrap:nowrap"><input type="text" data-in="style-name" placeholder="Name this style"><button data-act="save-style" title="Keep these fonts as a type style you can come back to">Save style</button></div>
+    </section>
+    <section>
+      <h4>Ask Claude</h4>
+      <textarea data-in="ask" rows="2" placeholder="Describe the type you want, e.g. a 70s Japanese synth manual, warm and technical"></textarea>
+      <div class="chips" data-out="asks" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:8px"><button class="primary" data-act="suggest">Aa Suggest 3 pairings</button><button data-act="suggest-more" title="Three more, different from these">More</button></div>
+      <div class="sugg" data-out="suggested" style="margin-top:8px"></div>
     </section>
     <section>
       <h4>Fonts in the app</h4>
@@ -247,10 +270,14 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
   let original = false;
   let busy = false;
   let picking: string | null = null;
+  /** Claude's suggested styles, newest first. */
+  let suggested: TypeStyle[] = load<TypeStyle[]>(`${storagePrefix}:type:suggested`, []);
+  /** A suggested style hovered: shown in the app until the pointer leaves. */
+  let previewStyle: State | null = null;
   let kind: FontKind | "all" = "all";
   let query = "";
 
-  const allStyles = () => [...styles, ...site.presets];
+  const allStyles = () => [...styles, ...site.presets, ...suggested];
   const roleOf = (token: string) => site.roles.find((r) => r.token === token)!;
   const changed = (p: RolePick) => p.family !== null || Math.round(p.size) !== 100 || p.weight !== 0 || Math.abs(p.spacing) > 1e-4;
   const anyChange = () => site.roles.some((r) => changed(state.roles[r.token])) || Math.abs(state.tracking - 1) > 1e-3;
@@ -445,7 +472,7 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
   };
 
   function apply() {
-    const css = original ? "" : cssFor(shown(), state.tracking);
+    const css = original ? "" : previewStyle ? cssFor(previewStyle.roles, previewStyle.tracking) : cssFor(shown(), state.tracking);
     const el = sheet();
     if (el.textContent !== css) {
       el.textContent = css;
@@ -551,7 +578,7 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
     out("style-name").textContent = activeStyle ? activeStyle.name : anyChange() ? "unsaved" : "";
     out("styles").innerHTML =
       `<button data-style="" class="${!anyChange() ? "on" : ""}" title="The fonts the app has today">As designed</button>` +
-      allStyles()
+      [...styles, ...site.presets]
         .map((s) => `<button data-style="${esc(s.id)}" class="${state.styleId === s.id ? "on" : ""}" title="${esc(s.why ?? describe(s))}">${esc(s.name)}${s.custom ? `<span class="x" data-act="drop-style" data-id="${esc(s.id)}" title="Delete this style">×</span>` : ""}</button>`)
         .join("");
     out("roles").innerHTML = site.roles
@@ -579,10 +606,81 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
       renderPicker();
       if (refocus) searchIn.focus();
     }
+    out("asks").innerHTML = (site.asks ?? []).map((a) => `<button data-ask="${esc(a)}">${esc(a)}</button>`).join("");
+    out("suggested").innerHTML = suggested.map(card).join("");
     trackingIn.value = String(Math.round(state.tracking * 100));
     out("tracking").textContent = `${Math.round(state.tracking * 100)}%`;
     out("applied").innerHTML = appliedRow(writer.last, esc);
     $<HTMLButtonElement>("[data-act=save]").disabled = !anyChange() || busy;
+  }
+
+  function card(s: TypeStyle) {
+    const fams = site.roles.filter((r) => s.roles[r.token]?.family);
+    for (const r of fams) loadSwatch(s.roles[r.token]!.family!);
+    return `<div class="card${state.styleId === s.id ? " on" : ""}" data-style="${esc(s.id)}" role="button" tabindex="0" title="Hover to try it in the app, click to keep it">
+      <div class="name">${esc(s.name)}${state.styleId === s.id ? "<em>On</em>" : ""}</div>
+      <div class="fams">${fams.map((r) => `<small>${esc(r.label)}</small><span style="font-family:'${esc(s.roles[r.token]!.family!)}', sans-serif">${esc(s.roles[r.token]!.family!)}</span>`).join("")}</div>
+      <p>${esc(s.why ?? "")}</p>
+      <button class="x" data-act="drop-sugg" data-id="${esc(s.id)}" title="Remove">×</button>
+    </div>`;
+  }
+
+  // ---- Ask Claude: three type styles from a description
+
+  const askBox = $<HTMLTextAreaElement>("[data-in=ask]");
+  const FAMILY_OK = /^[A-Za-z0-9][A-Za-z0-9 \-]{0,60}$/;
+  const clampN = (v: unknown, lo: number, hi: number, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+
+  async function suggest(more: boolean) {
+    const ask = askBox.value.trim();
+    if (!ask) return say("Describe the type you want, or tap a quick pick.", true);
+    if (busy) return;
+    busy = true;
+    const btn = $<HTMLButtonElement>("[data-act=suggest]");
+    btn.disabled = true;
+    btn.textContent = "Pairing…";
+    say("Claude is pairing fonts (about 30–60 seconds).");
+    try {
+      const catalogue: Record<string, string[]> = {};
+      for (const f of CATALOGUE) (catalogue[f.kind] ??= []).push(f.family);
+      const res = await fetch(`${endpoint}/type`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ask,
+          roles: site.roles.map((r) => ({ token: r.token, label: r.label, hint: r.hint, sample: r.sample, now: orig[r.token], rules: rules.filter((x) => x.token === r.token).length })),
+          catalogue,
+          avoid: more ? suggested.slice(0, 9).map((s) => `${s.name}: ${describe(s)}`) : [],
+        }),
+      });
+      const data = (await res.json()) as { styles?: { name?: string; why?: string; tracking?: number; roles?: { token?: string; family?: string; size?: number; weight?: number; spacing?: number }[] }[]; error?: string };
+      if (!res.ok || !data.styles) throw new Error(data.error ?? `The helper answered ${res.status}.`);
+      const tokens = new Set(site.roles.map((r) => r.token));
+      const made: TypeStyle[] = data.styles.slice(0, 3).map((v, i) => ({
+        id: `sugg-${Date.now().toString(36)}-${i}`,
+        name: String(v.name ?? `Pairing ${i + 1}`).replace(/\s+/g, " ").trim().slice(0, 40),
+        why: String(v.why ?? "").replace(/\s+/g, " ").trim().slice(0, 260),
+        tracking: clampN(v.tracking, 0, 2, 1),
+        roles: Object.fromEntries(
+          (v.roles ?? [])
+            .filter((r) => r.token && tokens.has(r.token) && FAMILY_OK.test(String(r.family ?? "").trim()))
+            .map((r) => [r.token!, { family: String(r.family).trim(), size: Math.round(clampN(r.size, 60, 150, 100)), weight: Math.round(clampN(r.weight, -300, 300, 0) / 100) * 100, spacing: +clampN(r.spacing, -0.05, 0.15, 0).toFixed(3) }]),
+        ),
+      })).filter((s) => Object.keys(s.roles).length);
+      if (!made.length) throw new Error("Claude's answer had no fonts in it.");
+      // Start loading every suggested font now, so hovering a card is quick.
+      for (const s of made) for (const p of Object.values(s.roles)) if (p.family) ensure(p.family, false);
+      suggested = [...made, ...suggested].slice(0, 12);
+      store(`${storagePrefix}:type:suggested`, suggested);
+      say(`${made.length} pairings from Claude. Hover one to try it in the app, click to keep it.`);
+    } catch (e) {
+      say(`Couldn't get pairings: ${(e as Error).message}`, true);
+    } finally {
+      busy = false;
+      btn.disabled = false;
+      btn.textContent = "Aa Suggest 3 pairings";
+      render();
+    }
   }
 
   function describe(s: TypeStyle) {
@@ -628,6 +726,7 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
   }
 
   function chooseStyle(id: string) {
+    previewStyle = null;
     const s = allStyles().find((x) => x.id === id);
     state = s ? fromStyle(s) : { roles: blankRoles(), tracking: 1, styleId: null };
     commit();
@@ -753,6 +852,22 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
     if (act === "clear") return chooseStyle("");
     if (act === "save") return void save();
     if (act === "save-style") return saveStyle();
+    if (act === "suggest") return void suggest(false);
+    if (act === "suggest-more") return void suggest(true);
+    if (act === "drop-sugg") {
+      e.stopPropagation();
+      const id = t.closest<HTMLElement>("[data-id]")!.dataset.id!;
+      suggested = suggested.filter((s) => s.id !== id);
+      store(`${storagePrefix}:type:suggested`, suggested);
+      if (previewStyle?.styleId === id) previewStyle = null;
+      apply();
+      return render();
+    }
+    const quick = t.closest<HTMLElement>("[data-ask]")?.dataset.ask;
+    if (quick) {
+      askBox.value = quick;
+      return;
+    }
     if (act === "undo-apply") return void undoApply();
     if (act === "drop-style") {
       e.stopPropagation();
@@ -796,6 +911,15 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
   root.addEventListener("keydown", (e) => {
     const k = e as KeyboardEvent;
     if (k.key === "Enter" && (k.target as HTMLElement).matches?.("[data-in=style-name]")) saveStyle();
+    if (k.key === "Enter" && (k.target as HTMLElement).matches?.("[data-in=ask]") && !k.shiftKey) {
+      k.preventDefault();
+      void suggest(false);
+    }
+    const cardEl = (k.target as HTMLElement).closest?.(".card[data-style]") as HTMLElement | null;
+    if (cardEl && (k.key === "Enter" || k.key === " ")) {
+      k.preventDefault();
+      chooseStyle(cardEl.dataset.style!);
+    }
     if (k.key === "Enter" && (k.target as HTMLElement).matches?.("[data-in=font-search]") && picking) {
       const first = fontsBox.querySelector<HTMLElement>("[data-family]:not([data-family=''])");
       if (first) chooseFont(picking, first.dataset.family!);
@@ -844,6 +968,14 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
   // Hover a font: try it in its role. Hover a rule count: outline where the role is.
   root.addEventListener("pointerover", (e) => {
     const t = e.target as HTMLElement;
+    const cardEl = t.closest<HTMLElement>(".card[data-style]");
+    if (cardEl && !busy && previewStyle?.styleId !== cardEl.dataset.style) {
+      const s = suggested.find((x) => x.id === cardEl.dataset.style);
+      if (s) {
+        previewStyle = fromStyle(s);
+        apply();
+      }
+    }
     const font = t.closest<HTMLElement>("[data-family]");
     if (font && picking && !busy) {
       const family = font.dataset.family || null;
@@ -858,6 +990,10 @@ export function mountTypeLab(options: TypeOptions): PanelControl | null {
   root.addEventListener("pointerout", (e) => {
     const t = e.target as HTMLElement;
     const to = (e as PointerEvent).relatedTarget as HTMLElement | null;
+    if (t.closest(".card") && !to?.closest?.(".card") && previewStyle) {
+      previewStyle = null;
+      apply();
+    }
     if (t.closest("[data-family]") && !to?.closest?.("[data-family]") && preview) {
       preview = null;
       apply();

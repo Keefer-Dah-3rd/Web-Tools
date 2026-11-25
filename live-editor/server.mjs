@@ -27,7 +27,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { build } from "esbuild";
-import { configFor, handleApplied, handleApply, handleInspiration, serveInspiration, handleDesign, handleDesignSave, handleTexture, handleTypeSave, handleEdits, handlePalette, handlePaletteSave, handleRewrite, handleUndo } from "./core.mjs";
+import { configFor, handleApplied, handleApply, handleInspiration, serveInspiration, handleDesign, handleDesignSave, handleTexture, handleTypeSave, handleType, handleEdits, handlePalette, handlePaletteSave, handleRewrite, handleUndo } from "./core.mjs";
 import { handleShowcase, handleShowcaseSave, serveShowcaseFile, showcaseDir } from "./showcase.mjs";
 
 const ENDPOINT = "/__page-editor";
@@ -116,6 +116,7 @@ createServer(async (req, res) => {
     if (path === `${ENDPOINT}/design`) return handleDesign(cfg, req, res);
     if (path === `${ENDPOINT}/design-save`) return handleDesignSave(cfg, req, res);
     if (path === `${ENDPOINT}/texture`) return handleTexture(cfg, req, res);
+    if (path === `${ENDPOINT}/type`) return handleType(cfg, req, res);
     if (path === `${ENDPOINT}/type-save`) return handleTypeSave(cfg, req, res);
     if (path === `${ENDPOINT}/apply`) return handleApply(cfg, req, res);
     if (path === `${ENDPOINT}/undo`) return handleUndo(cfg, req, res);

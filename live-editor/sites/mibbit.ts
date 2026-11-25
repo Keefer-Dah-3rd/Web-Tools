@@ -90,6 +90,16 @@ const type = mountTypeLab({
       { token: L, label: "LCD digits", sample: "88:88  128", hint: "Seven-segment displays" },
     ],
     tracking: ["--tracking-caps", "--tracking-caps-wide"],
+    asks: [
+      "70s Japanese synth manual",
+      "Braun calculator, very calm",
+      "Rave flyer, loud and condensed",
+      "Old Macintosh, friendly pixels",
+      "Swiss poster, strict grid",
+      "Lab equipment, engraved panels",
+      "Softer and rounder for beginners",
+      "Like Teenage Engineering, but warmer",
+    ],
     presets: [
       { id: "p-swiss", name: "Swiss hardware", why: "Clean grotesk labels over a plain mono, like a Braun or Dieter Rams panel.", roles: { [D]: { family: "Space Grotesk", size: 104, weight: 100 }, [M]: { family: "IBM Plex Mono" }, [S]: { family: "Inter Tight" } }, tracking: 0.8 },
       { id: "p-terminal", name: "Terminal", why: "A phosphor terminal: VT323 for the big type, JetBrains Mono for the rest.", roles: { [D]: { family: "VT323", size: 128 }, [M]: { family: "JetBrains Mono", size: 96 }, [B]: { family: "VT323", size: 120 } } },

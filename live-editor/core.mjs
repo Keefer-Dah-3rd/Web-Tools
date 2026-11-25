@@ -592,6 +592,86 @@ export function handleTypeSave(cfg, req, res) {
   });
 }
 
+// ---- Type Lab (type/lab.ts): three type styles (font pairings) from a description.
+
+const TYPE_SCHEMA = {
+  type: "object",
+  properties: {
+    styles: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          why: { type: "string" },
+          tracking: { type: "number" },
+          roles: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { token: { type: "string" }, family: { type: "string" }, size: { type: "number" }, weight: { type: "number" }, spacing: { type: "number" } },
+              required: ["token", "family", "size", "weight", "spacing"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["name", "why", "tracking", "roles"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["styles"],
+  additionalProperties: false,
+};
+
+function typeSystem(cfg) {
+  const parts = [readFileSync(join(HERE, "type", "brief.md"), "utf8")];
+  let room = 20000;
+  for (const file of cfg.designFacts ?? []) {
+    if (!existsSync(file) || room <= 0) continue;
+    const text = readFileSync(file, "utf8").slice(0, room);
+    room -= text.length;
+    parts.push(`## Design facts: ${file.split("/").slice(-2).join("/")}\n\n${text}`);
+  }
+  return parts.join("\n\n");
+}
+
+function typeAskPrompt(req) {
+  const roles = (Array.isArray(req.roles) ? req.roles.slice(0, 8) : []).map(
+    (r) => `- ${clip(r.token, 40)} (${clip(r.label, 30)}): ${clip(r.hint, 120)}. Today: ${clip(r.now, 200)}. Sample: "${clip(r.sample, 80)}". ${Number(r.rules) || 0} rules use it.`,
+  );
+  const catalogue = req.catalogue && typeof req.catalogue === "object" ? Object.entries(req.catalogue).map(([k, v]) => `- ${clip(k, 20)}: ${list(v, 60, 40).join(", ")}`) : [];
+  const avoid = list(req.avoid, 12, 240);
+  return [
+    "## What the designer described",
+    `"${clip(req.ask, 600)}"`,
+    "",
+    "## The app's font roles (use these tokens)",
+    ...roles,
+    "",
+    "## The catalogue (known to load)",
+    ...catalogue,
+    ...(avoid.length ? ["", "## Already suggested (go somewhere different)", ...avoid.map((a) => `- ${a}`)] : []),
+    "",
+    "Write 3 type styles.",
+  ].join("\n");
+}
+
+/** POST <endpoint>/type: a described type voice in, three type styles out. */
+export function handleType(cfg, req, res) {
+  jsonBody(req, res, 100_000, async (data, reply) => {
+    if (!clip(data.ask, 600)) return reply(400, { error: "Describe the type you want first." });
+    const system = typeSystem(cfg);
+    const prompt = typeAskPrompt(data);
+    const cli = await askCli(cfg, system, prompt, TYPE_SCHEMA);
+    if (cli.ok) return reply(200, { ...cli.answer, via: "Claude Code" });
+    if (!cfg.sessionFallback) return reply(502, { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error });
+    const session = await askSession(cfg, system, prompt, TYPE_SCHEMA);
+    if (session.ok) return reply(200, { ...session.answer, via: "Claude session" });
+    reply(502, { error: `${cli.error} No Claude session answered either.` });
+  });
+}
+
 // ---- Texture Lab (texture/lab.ts): three surface finishes from a description.
 
 const TEXTURE_SCHEMA = {
