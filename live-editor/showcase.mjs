@@ -93,7 +93,7 @@ function cssFile(r) {
     ` * Page: ${r.url}`,
     ` * Saved ${r.savedAt}. A design to show, not in the app's code: it sits on top of the app's own styles. */`,
   ].join("\n");
-  const extra = r.alsoOnPage ? `\n\n/* Also on the page when it was saved (a Colour Lab preview): */\n${r.alsoOnPage}` : "";
+  const extra = r.alsoOnPage ? `\n\n/* Also on the page when it was saved (a Colour Lab preview, page edits): */\n${r.alsoOnPage}` : "";
   return `${head}\n\n${r.cssApplied}${extra}\n`;
 }
 

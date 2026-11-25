@@ -203,7 +203,7 @@ const sheet = () => {
   return el;
 };
 
-/** What else was on the page in a showcase save (a Colour Lab preview), put back with it. */
+/** What else was on the page in a showcase save (a Colour Lab preview, page edits), put back with it. */
 const extraSheet = () => {
   let el = document.getElementById("showcase-extra") as HTMLStyleElement | null;
   if (!el) {
@@ -231,10 +231,11 @@ interface ShowcaseItem {
  * One still of this tab as it looks now, through Chrome's own tab capture (it asks once per shot;
  * nothing to install). The tools hide while it's taken. Null when it was cancelled or can't run.
  */
-async function captureTab(part: Element | null): Promise<{ screenshot: string; part: string | null } | null> {
+async function captureTab(part: Element | null): Promise<{ screenshot: string; part: string | null } | { refused: string } | null> {
   const media = navigator.mediaDevices as MediaDevices | undefined;
   if (!media?.getDisplayMedia) return null;
   let stream: MediaStream;
+  const asked = Date.now();
   try {
     stream = await media.getDisplayMedia({
       video: { displaySurface: "browser" },
@@ -243,8 +244,11 @@ async function captureTab(part: Element | null): Promise<{ screenshot: string; p
       selfBrowserSurface: "include",
       surfaceSwitching: "exclude",
     } as DisplayMediaStreamOptions);
-  } catch {
-    return null;
+  } catch (e) {
+    // NotAllowedError after a while: the person pressed Cancel. Anything else, or an instant
+    // refusal: Chrome wouldn't ask at all (it only does from the window in front, after a real click).
+    const name = (e as Error).name;
+    return { refused: name === "NotAllowedError" && Date.now() - asked > 400 ? "" : name };
   }
   const hide = document.createElement("style");
   hide.textContent = `${TOOL} { visibility: hidden !important; }`;
@@ -839,7 +843,13 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     say("Chrome will ask to see this tab: choose this tab and Share. The tools hide for the shot.");
     try {
       const shot = await captureTab(target.scope === "app" ? null : element);
-      if (!shot && "getDisplayMedia" in (navigator.mediaDevices ?? {})) return say("Cancelled; nothing saved.");
+      if (shot && "refused" in shot)
+        return say(
+          shot.refused
+            ? `Chrome wouldn't take the screenshot (${shot.refused}); nothing saved. Bring this Chrome window to the front, click 📸 again and press Share.`
+            : "Cancelled; nothing saved.",
+          !!shot.refused,
+        );
       btn.textContent = "Saving…";
       const extras = ["colour-lab-vars", "live-editor-rules"]
         .map((id) => document.getElementById(id)?.textContent?.trim())
@@ -906,7 +916,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       remember();
       setOpen(true);
       render();
-      say(`Showing “${item.name}” from the showcase${restored.extra ? ", with the Colour Lab preview it had" : ""}.${element ? "" : " Its part isn't on screen right now."}`);
+      say(`Showing “${item.name}” from the showcase${restored.extra ? ", with the other live changes it had (Colour Lab, page edits)" : ""}.${element ? "" : " Its part isn't on screen right now."}`);
     } catch (e) {
       say(`Couldn't show that save: ${(e as Error).message}`, true);
     }
