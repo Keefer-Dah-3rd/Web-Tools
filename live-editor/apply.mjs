@@ -324,7 +324,9 @@ ${json}
 
 Each edit has a CSS selector, the components it sits in ("source": a file and approximate line when known, then "in A < B < C"), its tag and classes, and what changed:
 - newText / html: the words changed from wasText. Change the string in the JSX (or the copy file it comes from) so it says newText. Keep any markup inside it.
-- color / fill: a text or background colour picked from the app's palette. Use the matching role token (var(--color-…) / var(--surface-…)) in the component's stylesheet; the swatch hexes match the tokens in web/src/styles/tokens.css. Never write raw hex.
+- color: a text colour (for the element and the words inside it) picked from the app's palette.
+- fill: the object's own colour (a pad, button, knob or icon). "plan" says how it was painted: plan.vars are the colour variables it paints with (set those on the component's rule, so its gradients, glow and pseudo-elements follow); otherwise recolour its gradient stops / background (keep the shading), coloured glow and SVG fill/stroke (plan.shapes).
+- For both: use the matching role token (var(--color-…) / var(--surface-…)) in the component's stylesheet; the swatch hexes match the tokens in web/src/styles/tokens.css. Never write raw hex.
 - fontSize (px) / type (a type style: title, status, tab, value, body, heading, small, lcd) / scale: write it into the component's stylesheet using the app's font tokens.
 - removed: take the element out of the JSX only if it's clearly decorative or redundant; otherwise leave it and say so.
 

@@ -10,6 +10,7 @@
  */
 import { slopIn } from "../page-editor/slop";
 import { type SiteRules, holdsProtected, isProtected } from "./site-rules";
+import { type ObjectPlan, objectCss, planFor, reachable } from "./objectColour";
 
 interface Edit {
   selector: string;
@@ -24,7 +25,10 @@ interface Edit {
   /** A key of the editor's type styles. */
   type?: string;
   color?: string;
+  /** An object colour: carried through however the object is painted (see objectColour.ts). */
   fill?: string;
+  /** How the object was painted when it first got its colour. */
+  plan?: ObjectPlan;
   /** Scale, 1 = as designed. */
   scale?: number;
   /** Rewritten text: the element's new innerHTML, its plain text, and both as they were. */
@@ -313,7 +317,7 @@ const HTML = `
         <div class="types"></div>
       </div>
       <div style="margin-top:12px">
-        <h4>Colour <span class="row" style="gap:4px"><button data-target="color" aria-pressed="true">Text</button><button data-target="fill" aria-pressed="false">Fill</button></span></h4>
+        <h4>Colour <span class="row" style="gap:4px"><button data-target="color" aria-pressed="true" title="Recolour the words in it">Text</button><button data-target="fill" aria-pressed="false" title="Recolour the object itself: its fill, gradient, glow or icon">Object</button></span></h4>
         <div class="swatches"></div>
         <div class="row">
           <input type="color" class="picker" aria-label="Custom colour">
@@ -555,6 +559,9 @@ export function mountEditor(options: EditorOptions | string): void {
     const cls = typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 3).join(".")}` : "";
     return `${el.tagName.toLowerCase()}${cls}`;
   };
+  /** Whether the element itself holds words (not just parts that do). */
+  const hasOwnWords = (el: Element) =>
+    /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && /\S/.test(n.textContent ?? ""));
   const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 70);
 
   const find = (selector: string): Element | null => {
@@ -908,6 +915,31 @@ export function mountEditor(options: EditorOptions | string): void {
     say("Using that one. ⌘Z or Original text to go back.");
   };
 
+  /**
+   * Text colour reaches the words inside too (they often set their own), but not icons (SVG paints
+   * with the text colour, and a play triangle isn't words) and never the mascot.
+   */
+  const textInside = (selector: string, hex: string) => {
+    const keep = opts.rules?.protect.length ? `:not(${opts.rules.protect.join(", ")}, :is(${opts.rules.protect.join(", ")}) *)` : "";
+    return `${selector} *:not(svg, svg *, :has(svg))${keep} { color: ${hex} !important; }`;
+  };
+  /** How an element is painted, read with none of our colour on it (cached while it stays picked). */
+  let planCache: { el: Element; plan: ObjectPlan } | null = null;
+  const readPlan = (el: Element): ObjectPlan => {
+    if (planCache?.el === el) return planCache.plan;
+    const media = sheet.media;
+    sheet.media = "not all";
+    peekSheet.textContent = "";
+    const plan = planFor(el, selectorOf, opts.rules, [sheet.sheet, peekSheet.sheet]);
+    sheet.media = media;
+    planCache = { el, plan };
+    return plan;
+  };
+  const ensurePlan = (edit: Edit, el: Element) => {
+    if (!edit.plan) edit.plan = readPlan(el);
+    if (edit.plan.canvas && !reachable(edit.plan)) say("That part is drawn in code (a canvas), so a colour here can't reach it. Pick something around it.", true);
+  };
+
   const rules = (): string =>
     edits
       .map((e) => {
@@ -915,10 +947,9 @@ export function mountEditor(options: EditorOptions | string): void {
         if (e.type && TYPE[e.type]) css += TYPE[e.type].css.replace(/;/g, " !important;");
         if (e.fontSize != null) css += ` font-size: ${e.fontSize}px !important;`;
         if (e.color) css += ` color: ${e.color} !important;`;
-        if (e.fill) css += ` background: ${e.fill} !important;`;
         if (e.scale != null && e.scale !== 1) css += ` zoom: ${e.scale} !important;`;
         if (e.removed) css += " display: none !important;";
-        return css ? `${e.selector} {${css} }` : "";
+        return [css ? `${e.selector} {${css} }` : "", e.color ? textInside(e.selector, e.color) : "", e.fill ? objectCss(e.selector, e.plan, e.fill) : ""].filter(Boolean).join("\n");
       })
       .join("\n");
 
@@ -1107,7 +1138,12 @@ export function mountEditor(options: EditorOptions | string): void {
       ($(".size") as HTMLInputElement).value = String(Math.round(px * 10) / 10);
       $(".fs").textContent = edit?.fontSize != null ? `was ${edit.was.fontSize}` : "";
       types.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.type === edit?.type)));
-      const current = (target === "color" ? edit?.color : edit?.fill) ?? rgbToHex(target === "color" ? cs.color : cs.backgroundColor);
+      const objectNow = () => {
+        const plan = edit?.plan ?? (planCache?.el === picked ? planCache.plan : undefined);
+        const v = plan?.vars[0] && cs.getPropertyValue(plan.vars[0]).trim();
+        return rgbToHex(v || cs.backgroundColor);
+      };
+      const current = (target === "color" ? edit?.color : edit?.fill) ?? (target === "color" ? rgbToHex(cs.color) : objectNow());
       ($(".hex") as HTMLInputElement).value = current;
       if (/^#[0-9a-f]{6}$/i.test(current)) ($(".picker") as HTMLInputElement).value = current;
       root.querySelectorAll<HTMLElement>("[data-colour]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.colour!.toLowerCase() === current.toLowerCase())));
@@ -1121,7 +1157,7 @@ export function mountEditor(options: EditorOptions | string): void {
     $(".count").textContent = String(edits.length);
     $(".list").innerHTML = edits
       .map((e, i) => {
-        const what = [e.removed && "removed", e.newText != null && `text “${e.newText.slice(0, 26).replace(/</g, "&lt;")}”`, e.type && TYPE[e.type]?.label, e.fontSize != null && `${e.fontSize}px`, e.color && `text ${e.color}`, e.fill && `fill ${e.fill}`, e.scale != null && e.scale !== 1 && `${Math.round(e.scale * 100)}%`].filter(Boolean).join(", ");
+        const what = [e.removed && "removed", e.newText != null && `text “${e.newText.slice(0, 26).replace(/</g, "&lt;")}”`, e.type && TYPE[e.type]?.label, e.fontSize != null && `${e.fontSize}px`, e.color && `text ${e.color}`, e.fill && `object ${e.fill}`, e.scale != null && e.scale !== 1 && `${Math.round(e.scale * 100)}%`].filter(Boolean).join(", ");
         return `<div><span data-go="${i}" title="${e.selector}">${e.tag}${e.text ? ` “${e.text.slice(0, 22).replace(/</g, "&lt;")}”` : ""} <em>${what}</em></span><button class="ghost" data-revert="${i}" title="Revert this change">✕</button></div>`;
       })
       .join("");
@@ -1138,7 +1174,13 @@ export function mountEditor(options: EditorOptions | string): void {
       el = null;
     }
     if (el && !ours(el) && !inScope(el)) say("Only the part of the page that comes from your code can be edited here.", true);
+    const was = picked;
     picked = el && !ours(el) && inScope(el) && el !== document.body && el !== document.documentElement ? el : null;
+    if (picked && picked !== was) {
+      planCache = null;
+      // Words get Text; a pad, button, knob or icon gets Object, so a colour lands where it shows.
+      target = hasOwnWords(picked) ? "color" : "fill";
+    }
     render();
   };
 
@@ -1156,7 +1198,13 @@ export function mountEditor(options: EditorOptions | string): void {
   };
   const setColour = (hex: string) => {
     peekSheet.textContent = "";
-    change((e) => (target === "color" ? (e.color = hex) : (e.fill = hex)));
+    change((e, el) => {
+      if (target === "color") e.color = hex;
+      else {
+        ensurePlan(e, el);
+        e.fill = hex;
+      }
+    });
   };
   // Hover a colour swatch or a type style: the picked element wears it until the pointer moves off
   // them; a click keeps it.
@@ -1174,8 +1222,16 @@ export function mountEditor(options: EditorOptions | string): void {
     }
     if (!picked || editing) return;
     let look: string;
-    if (swatch) look = `${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important;`;
-    else if (typeKey) look = TYPE[typeKey].css.replace(/;/g, " !important;");
+    if (swatch && target === "fill") {
+      const edit = editFor(picked, false);
+      peekSheet.textContent = objectCss(selectorOf(picked), edit?.plan ?? readPlan(picked), swatch.dataset.colour!);
+      return;
+    }
+    if (swatch) {
+      peekSheet.textContent = `${selectorOf(picked)} { color: ${swatch.dataset.colour} !important; }\n${textInside(selectorOf(picked), swatch.dataset.colour!)}`;
+      return;
+    }
+    if (typeKey) look = TYPE[typeKey].css.replace(/;/g, " !important;");
     else if (scaleAct && holdsProtected(opts.rules, picked)) return;
     else if (scaleAct) {
       // The scale a click would give: 5% from the element's own scale (as edited), or as designed.
@@ -1401,7 +1457,10 @@ export function mountEditor(options: EditorOptions | string): void {
     const edit = editFor(picked, true)!;
     const hex = (event.target as HTMLInputElement).value.toUpperCase();
     if (target === "color") edit.color = hex;
-    else edit.fill = hex;
+    else {
+      ensurePlan(edit, picked);
+      edit.fill = hex;
+    }
     sheet.textContent = rules();
     ($(".hex") as HTMLInputElement).value = hex;
   });
