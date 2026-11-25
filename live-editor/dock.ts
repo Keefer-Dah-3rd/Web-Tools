@@ -1,15 +1,18 @@
+import { createSplit } from "./split";
+
 /**
  * The dock: one small launcher for the design tools, out of the app's way, with shortcuts.
  *
  *   ⌥E  the edit toolbar      ⌥C  Colour Lab      ⌥D  Design Generator      ⌥T  Texture Lab
- *   ⌥H  hide every tool
+ *   ⌥H  hide every tool      ⌥S  side by side / floating
  *
  * Shortcuts use Option (Alt) so they don't collide with an app's own single keys; they match by
  * physical key (⌥C types "ç" on a Mac). ⌥H hides every tool, outlines and all, for a clean look
  * at the app; press it again (or click the dock's dot) to bring them back as they were.
  *
- * Docked: every tool opens in the same left-hand slot, one at a time (opening one folds the
- * others), fixed in place above the dock.
+ * Docked: every tool opens in the same slot, one at a time (opening one folds the others).
+ * Side by side (the default, see split.ts) that slot is a pane on the right of the window and the
+ * app shrinks to the rest, with a divider to drag; floating, it sits over the page on the left.
  *
  * ⌘Z / ⌘⇧Z go to the tool you last used (clicked in, or picking on the page with); when you last
  * clicked the app itself, they're the app's own undo and redo, untouched.
@@ -39,6 +42,8 @@ export interface DockOptions {
   /** Where the dock sits. Default: bottom left, 8px in. */
   position?: Partial<Record<"left" | "right" | "top" | "bottom", string>>;
   storagePrefix: string;
+  /** Page rules sized to the viewport (`width: 100vw`) to size to the app when side by side. */
+  viewportWide?: string[];
 }
 
 const STYLE = `
@@ -54,6 +59,14 @@ button:focus-visible { outline: 2px solid #3ea0ff; outline-offset: 1px; }
 .dot i { display: block; width: 9px; height: 9px; border-radius: 50%; background: #3ea0ff; box-shadow: 0 0 0 3px rgba(62,160,255,.22); }
 .dock.hiding .dot i { background: #5b6472; box-shadow: none; }
 .dock.hiding button:not(.dot) { display: none; }
+.split-divider { position: fixed; top: 0; bottom: 0; width: 9px; z-index: 2147483650; cursor: col-resize; touch-action: none; }
+.split-divider::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: rgba(255, 255, 255, 0.16); }
+.split-divider::after { content: ""; position: absolute; top: 50%; left: 2px; width: 5px; height: 38px; margin-top: -19px; border-radius: 3px; background: rgba(255, 255, 255, 0.28); }
+.split-divider:hover::before, .split-divider.dragging::before, .split-divider:focus-visible::before { left: 3px; width: 3px; background: #3ea0ff; }
+.split-divider:hover::after, .split-divider.dragging::after { background: #3ea0ff; }
+.split-divider:focus { outline: none; }
+.split-divider[hidden] { display: none; }
+.sep { width: 1px; height: 14px; background: rgba(255, 255, 255, 0.16); margin: 0 2px; }
 kbd { font: 600 9.5px ui-monospace, Menlo, monospace; color: #8e9aab; }
 `;
 
@@ -109,8 +122,13 @@ export function mountDock(options: DockOptions): void {
   root.innerHTML = `<style>${STYLE}</style><div class="dock" style="${place}">
     <button class="dot" data-act="hide" title="Hide every tool (⌥H)"><i></i></button>
     ${items.map((t, i) => `<button data-tool="${i}" title="${t.label} (⌥${t.code.replace(/^Key/, "")})">${t.icon} ${t.label} <kbd>⌥${t.code.replace(/^Key/, "")}</kbd></button>`).join("")}
+    <i class="sep"></i><button data-act="split" title="Side by side or floating over the app (⌥S)"></button>
   </div>`;
   const dock = root.querySelector<HTMLElement>(".dock")!;
+
+  const split = createSplit({ storagePrefix: options.storagePrefix, viewportWide: options.viewportWide, toolHosts: () => toolHosts() });
+  root.appendChild(split.divider);
+  const splitButton = root.querySelector<HTMLElement>("[data-act=split]")!;
 
   function remember(key: string, value: boolean) {
     try {
@@ -142,6 +160,10 @@ export function mountDock(options: DockOptions): void {
 
   const render = () => {
     root.querySelectorAll<HTMLElement>("[data-tool]").forEach((b) => b.classList.toggle("on", !hidden && items[Number(b.dataset.tool)].control.isOpen()));
+    const side = split.sideBySide();
+    splitButton.textContent = side ? "◧ Side" : "❐ Float";
+    splitButton.classList.toggle("on", side);
+    split.sync(!hidden && items.some((t) => t.control.isOpen()));
   };
 
   const toggle = (i: number) => {
@@ -160,6 +182,7 @@ export function mountDock(options: DockOptions): void {
   root.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t.closest("[data-act=hide]")) setHidden(!hidden);
+    if (t.closest("[data-act=split]")) { split.setSideBySide(!split.sideBySide()); render(); }
     const i = t.closest<HTMLElement>("[data-tool]")?.dataset.tool;
     if (i != null) toggle(Number(i));
   });
@@ -178,6 +201,7 @@ export function mountDock(options: DockOptions): void {
       }
       if (!e.altKey || e.metaKey || e.ctrlKey || e.repeat) return;
       if (e.code === "KeyH") setHidden(!hidden);
+      else if (e.code === "KeyS") { split.setSideBySide(!split.sideBySide()); render(); }
       else {
         const i = items.findIndex((t) => t.code === e.code);
         if (i < 0) return;
@@ -190,6 +214,16 @@ export function mountDock(options: DockOptions): void {
   );
   // Panels open and fold themselves too (and fold for each other): keep the dock's lights true.
   window.addEventListener("review-tool:open", () => window.setTimeout(render, 0));
+  window.addEventListener("review-tool:close", () => window.setTimeout(render, 0));
+  // A panel's own fold button (−) closes it without an event: check after clicks and keys in a tool.
+  let queued = false;
+  const later = (e: Event) => {
+    if (queued || !toolOf(e)) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; render(); });
+  };
+  document.addEventListener("pointerup", later, true);
+  document.addEventListener("keyup", later, true);
   root.addEventListener("pointerenter", render);
 
   if (!recall(editorKey, true)) items[0].control.close();

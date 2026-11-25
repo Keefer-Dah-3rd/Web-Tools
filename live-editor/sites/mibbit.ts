@@ -77,6 +77,8 @@ const texture = mountTextureLab({
 // One launcher in Mibbit's bottom bar (empty on the left) instead of floating pills; ⌥E ⌥C ⌥D ⌥T, ⌥H hides all.
 mountDock({
   storagePrefix: "mibbit-tools",
+  // Side by side, these full-window rules (width: 100vw) size to the app's half instead.
+  viewportWide: [".app-shell", ".prompt-bar--oled"],
   tools: [
     ...(colour ? [{ label: "Colour", icon: "◐", code: "KeyC", host: "colour-lab", control: colour }] : []),
     ...(design ? [{ label: "Design", icon: "✦", code: "KeyD", host: "design-generator", control: design }] : []),
