@@ -4,6 +4,9 @@
 //            contrast script is re-run (a failing pairing stops the apply and puts the file
 //            back) and its table is regenerated.
 //   design   Claude Code writes the variation into the component's stylesheet.
+//   type     Deterministic for fonts: the --font-* tokens (tokens.css and the matching lines in
+//            Tailwind's @theme, which would otherwise win), caps tracking, and one marked font
+//            block per role in index.html. Weight and spacing moves on component rules go to Claude Code.
 //   page     Claude Code writes the toolbar's text and style edits into the code, then the
 //            helper marks the save applied so the toolbar reloads.
 //
@@ -429,12 +432,164 @@ async function guardBreach(cfg, changed) {
   return null;
 }
 
+// ---- type styles: fonts deterministic, rule weight/spacing via Claude
+
+const FAMILY = /^[A-Za-z0-9][A-Za-z0-9 \-]{0,60}$/;
+const V1_WEIGHTS = "100,200,300,400,500,600,700,800,900";
+/** index.html holds one marked block per font role that a type style changed. */
+const blockOpen = (token) => `<!-- type-lab:${token} `;
+const blockClose = (token) => `<!-- /type-lab:${token} -->`;
+
+/** Only @font-face blocks whose files come from Google's font host or the app's own /fonts/. */
+function safeFaces(css) {
+  const blocks = String(css ?? "").match(/@font-face\{[^{}]*\}/g) ?? [];
+  if (blocks.join("\n").length !== String(css ?? "").trim().length) throw new Error("The saved fonts hold something other than @font-face rules; nothing changed.");
+  for (const b of blocks) {
+    for (const [, url] of b.matchAll(/url\("?([^")]+)"?\)/g))
+      if (!/^https:\/\/fonts\.gstatic\.com\//.test(url) && !/^\/fonts\/[\w.\-]+$/.test(url)) throw new Error(`Odd font file ${url}; nothing changed.`);
+    if (/<|>|@import|expression|javascript:/i.test(b)) throw new Error("Odd font rule; nothing changed.");
+  }
+  return blocks;
+}
+
+/** A font stack split into its families (commas inside quotes don't occur in family names). */
+const families = (stack) => stack.split(",").map((f) => f.trim()).filter(Boolean);
+
+const typePrompt = (save, json) => `You are applying the weight and letter-spacing part of a type style ("${save.name}") that the designer tried live across the running app with the Type Lab and chose to keep. The fonts themselves are already written into the tokens; don't touch web/src/styles/tokens.css, web/src/styles/index.css or web/index.html.
+
+Here are the rules to change:
+
+\`\`\`json
+${json}
+\`\`\`
+
+Each entry is one existing CSS rule: the stylesheet the browser saw it in (often web/src/styles/index.css, which only @imports the others: Grep web/src/styles for the selector to find the file it's written in), the @layer / @media blocks around it ("wrap"), its selector, what its font-weight and letter-spacing were ("was"; "(inherited)" means the rule didn't set it), and the declarations it now needs ("now"). Change each rule in place so it has those declarations: replace an existing font-weight / letter-spacing, or add the line next to the rule's font-family. Don't add override rules or new layers. Keep calc() and var() exactly as given. Change only CSS files under web/src/styles/. If a rule can't be found, skip it and say so.
+
+When done, reply with one or two plain sentences saying how many rules changed, and anything you skipped.`;
+
+async function applyType(cfg, save, untrackedBefore) {
+  const a = cfg.apply;
+  const html = a.html ?? "web/index.html";
+  const theme = a.themeCss ?? "web/src/styles/index.css";
+  const before = new Map();
+  const edit = (rel, change) => {
+    const path = join(a.repo, rel);
+    const text = readFileSync(path, "utf8");
+    if (!before.has(rel)) before.set(rel, text);
+    writeFileSync(path, change(text));
+  };
+  const restore = () => {
+    for (const [rel, text] of before) writeFileSync(join(a.repo, rel), text);
+  };
+  try {
+    const roles = (Array.isArray(save.roles) ? save.roles : []).filter((r) => r.now);
+    for (const r of roles) {
+      if (!/^--font-[a-z][\w-]*$/.test(r.token)) throw new Error(`Odd font role ${r.token}; nothing changed.`);
+      if (!FAMILY.test(String(r.now.first ?? ""))) throw new Error(`Odd font name ${r.now.first}; nothing changed.`);
+      if (r.now.google && !FAMILY.test(r.now.google)) throw new Error(`Odd font name ${r.now.google}; nothing changed.`);
+    }
+    for (const [t, v] of Object.entries(save.tracking ?? {}))
+      if (!/^--[\w-]+$/.test(t) || !/^-?[\d.]+(em|px|rem)?$/.test(String(v))) throw new Error(`Odd tracking ${t}: ${v}; nothing changed.`);
+
+    // Each role's new stack: the new family in front of the stack the code has now. A family an
+    // earlier type style put in front (it has a block in index.html) is replaced, not kept behind.
+    const page = readFileSync(join(a.repo, html), "utf8");
+    const tokensText = readFileSync(join(a.repo, a.tokens), "utf8");
+    const tokens = {};
+    for (const r of roles) {
+      const now = tokensText.match(new RegExp(`^\\s*${esc(r.token)}\\s*:\\s*([^;]+);`, "m"))?.[1];
+      if (!now) throw new Error(`${r.token} isn't in ${a.tokens}; nothing changed.`);
+      const tail = families(now).slice(page.includes(blockOpen(r.token)) ? 1 : 0);
+      tokens[r.token] = [`"${r.now.first}"`, ...tail.filter((f) => f.replace(/["']/g, "") !== r.now.first)].join(", ");
+    }
+
+    // tokens.css: each font role and tracking token where it's defined.
+    edit(a.tokens, (css) => {
+      for (const [t, v] of [...Object.entries(tokens), ...Object.entries(save.tracking ?? {})]) {
+        const re = new RegExp(`(^\\s*${esc(t)}\\s*:\\s*)[^;]+;`, "m");
+        if (!re.test(css)) throw new Error(`${t} isn't in ${a.tokens}; nothing changed.`);
+        css = css.replace(re, `$1${v};`);
+      }
+      return css;
+    });
+    // Tailwind's @theme declares the same font tokens and its layer wins: they must say the same.
+    if (Object.keys(tokens).length && existsSync(join(a.repo, theme)))
+      edit(theme, (css) => {
+        const start = css.indexOf("@theme");
+        if (start < 0) return css;
+        const end = css.indexOf("}", start);
+        let block = css.slice(start, end);
+        for (const [t, v] of Object.entries(tokens)) block = block.replace(new RegExp(`(^\\s*${esc(t)}\\s*:\\s*)[^;]+;`, "m"), `$1${v};`);
+        return css.slice(0, start) + block + css.slice(end);
+      });
+    // index.html: one marked block per role that loads its font (a later style replaces it).
+    if (roles.length)
+      edit(html, (text) => {
+        for (const r of roles) {
+          const s0 = text.indexOf(blockOpen(r.token));
+          const close = blockClose(r.token);
+          const e0 = text.indexOf(close);
+          if (s0 >= 0 && e0 > s0) text = text.slice(0, s0).replace(/[ \t]*$/, "") + text.slice(e0 + close.length).replace(/^\n/, "");
+          const faces = r.now.faces ? safeFaces(r.now.faces) : [];
+          if (!r.now.google && !faces.length) continue;
+          const what = `${r.family ?? r.now.first}${r.size !== 100 ? ` at ${r.size}%` : ""}`;
+          const lines = [
+            `    ${blockOpen(r.token)}— ${String(r.label).replace(/--/g, "-")} font, from the type style “${String(save.name).replace(/--/g, "-").slice(0, 60)}” (Type Lab): ${what}. Google Fonts; self-host before launch. -->`,
+            '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />',
+            ...(r.now.google ? [`    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=${r.now.google.replace(/ /g, "+")}:${V1_WEIGHTS}&amp;display=swap" />`] : []),
+            ...(faces.length ? ["    <style>", ...faces.map((f) => `      ${f}`), "    </style>"] : []),
+            `    ${close}`,
+          ];
+          const at = text.indexOf("</head>");
+          if (at < 0) throw new Error(`${html} has no </head>; nothing changed.`);
+          text = `${text.slice(0, at).replace(/[ \t]*$/, "")}${lines.join("\n")}\n  ${text.slice(at)}`;
+        }
+        return text;
+      });
+
+    let changed = await changedFiles(cfg, untrackedBefore);
+    // index.css is off limits to the tools, except its matching --font-* lines in @theme.
+    const themeDiff = (await git(cfg, "diff", "-U0", "HEAD", "--", theme)).stdout.split("\n").filter((l) => /^[+-](?![+-])/.test(l));
+    if (themeDiff.some((l) => !/^[+-]\s*--font-[\w-]+\s*:/.test(l))) throw new Error(`The change touched more of ${theme} than its font lines; nothing changed.`);
+    const breach = await guardBreach(cfg, changed.filter((f) => f !== theme));
+    if (breach) throw new Error(`${breach} Nothing changed.`);
+
+    let summary = [
+      roles.length && `fonts for ${roles.map((r) => r.label).join(", ")}`,
+      Object.keys(save.tracking ?? {}).length && "caps tracking",
+    ].filter(Boolean);
+    const ruleEdits = Array.isArray(save.rules) ? save.rules : [];
+    if (ruleEdits.length) {
+      const mine = new Map([...before.keys()].map((f) => [f, readFileSync(join(a.repo, f), "utf8")]));
+      const answer = await claudeEdits(cfg, typePrompt(save, JSON.stringify(ruleEdits, null, 2).slice(0, 60_000)) + guardText(cfg, save));
+      changed = await changedFiles(cfg, untrackedBefore);
+      const outside = changed.filter((f) => !before.has(f) && !within(f, ["web/src/styles/**"]));
+      const meddled = [...mine].filter(([f, text]) => readFileSync(join(a.repo, f), "utf8") !== text).map(([f]) => f);
+      if (!answer.ok || outside.length || meddled.length) {
+        await putBack(cfg, changed.filter((f) => !before.has(f)), untrackedBefore);
+        throw new Error(!answer.ok ? answer.error : `Claude changed files it shouldn't (${[...outside, ...meddled].join(", ")}), so nothing was kept.`);
+      }
+      const breach2 = await guardBreach(cfg, changed.filter((f) => f !== theme));
+      if (breach2) {
+        await putBack(cfg, changed.filter((f) => !before.has(f)), untrackedBefore);
+        throw new Error(`${breach2} Nothing was kept.`);
+      }
+      summary.push(answer.summary ? `weight and spacing (${answer.summary})` : "weight and spacing");
+    }
+    const sha = await commit(cfg, changed, `Type: ${save.name}`);
+    return { commit: sha, files: changed, summary: `Wrote ${summary.join(", ")} into the app.` };
+  } catch (e) {
+    restore();
+    throw e;
+  }
+}
+
 // ---- the queue
 
 let busy = null;
 
 /**
- * Apply one save. kind: "palette" | "design" | "page"; file: the save's file in editsDir.
+ * Apply one save. kind: "palette" | "design" | "type" | "page"; file: the save's file in editsDir.
  * Returns { commit, files, summary } or throws with a message for the designer.
  */
 export async function applySave(cfg, kind, name) {
@@ -450,7 +605,7 @@ export async function applySave(cfg, kind, name) {
     const untrackedBefore = await untrackedNow(cfg);
     let result;
     try {
-      result = kind === "palette" ? await applyPalette(cfg, save, untrackedBefore) : await applyWithClaude(cfg, kind, save, untrackedBefore);
+      result = kind === "palette" ? await applyPalette(cfg, save, untrackedBefore) : kind === "type" ? await applyType(cfg, save, untrackedBefore) : await applyWithClaude(cfg, kind, save, untrackedBefore);
     } catch (e) {
       // Logged too: the app's dev server may have reloaded the page before this answer arrives.
       writeLog(cfg, { kind, save: name, name: save.name ?? save.page, failed: String(e?.message ?? e).slice(0, 600), at: new Date().toISOString() });

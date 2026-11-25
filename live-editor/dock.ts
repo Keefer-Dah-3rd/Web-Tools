@@ -3,7 +3,7 @@ import { createSplit } from "./split";
 /**
  * The dock: one small launcher for the design tools, out of the app's way, with shortcuts.
  *
- *   ⌥E  the edit toolbar      ⌥C  Colour Lab      ⌥D  Design Generator      ⌥T  Texture Lab
+ *   ⌥E  the edit toolbar      ⌥C  Colour Lab      ⌥D  Design Generator      ⌥T  Texture Lab      ⌥F  Type Lab
  *   ⌥H  hide every tool      ⌥S  side by side / floating
  *
  * Shortcuts use Option (Alt) so they don't collide with an app's own single keys; they match by

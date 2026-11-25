@@ -580,6 +580,18 @@ export function handleDesignSave(cfg, req, res) {
   });
 }
 
+/** POST <endpoint>/type-save: a type style from the Type Lab, written to <editsDir>/type-<name>.json. */
+export function handleTypeSave(cfg, req, res) {
+  jsonBody(req, res, 400_000, (data, reply) => {
+    if (!data || !Array.isArray(data.roles) || (!data.roles.length && !Object.keys(data.tracking ?? {}).length)) return reply(400, { error: "No type style to save." });
+    const slug = clip(data.name, 60).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "type";
+    mkdirSync(cfg.editsDir, { recursive: true });
+    const file = join(cfg.editsDir, `type-${slug}.json`);
+    writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+    reply(200, { file, name: `type-${slug}.json`, canApply: !!cfg.apply });
+  });
+}
+
 // ---- Texture Lab (texture/lab.ts): three surface finishes from a description.
 
 const TEXTURE_SCHEMA = {
@@ -671,7 +683,7 @@ export function handleTexture(cfg, req, res) {
 /** POST <endpoint>/apply {kind: "palette" | "design", name}: write a save into the code and commit it. */
 export function handleApply(cfg, req, res) {
   jsonBody(req, res, 10_000, async (data, reply) => {
-    if (!["palette", "design"].includes(data.kind)) return reply(400, { error: "Only palettes and designs apply from here." });
+    if (!["palette", "design", "type"].includes(data.kind)) return reply(400, { error: "Only palettes, designs and type styles apply from here." });
     const { applySave } = await import("./apply.mjs");
     try {
       reply(200, await applySave(cfg, data.kind, String(data.name ?? "")));

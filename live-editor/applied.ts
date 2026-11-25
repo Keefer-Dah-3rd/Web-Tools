@@ -52,7 +52,7 @@ export class CodeWriter {
   }
 
   /** Write a saved palette or design (by its file name from the save) into the code. */
-  async apply(kind: "palette" | "design", file: string, name: string): Promise<Applied> {
+  async apply(kind: "palette" | "design" | "type", file: string, name: string): Promise<Applied> {
     // The app's dev server may reload the page as soon as the code changes, before the answer
     // arrives; note the apply first so the reloaded page can pick up its result (recover()).
     try {

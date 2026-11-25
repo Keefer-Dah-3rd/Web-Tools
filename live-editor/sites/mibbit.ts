@@ -15,6 +15,7 @@ import { MIBBIT_NAMES, MIBBIT_TYPES, mibbitSwatches } from "../../page-editor/pr
 import { mountColourLab } from "../colour/lab";
 import { mountDesignGenerator } from "../design/generator";
 import { mountTextureLab } from "../texture/lab";
+import { mountTypeLab } from "../type/lab";
 import { mountDock } from "../dock";
 import { MIBBIT_RULES } from "./mibbit-rules";
 import { MIBBIT_DESIGN } from "./mibbit-design";
@@ -74,7 +75,34 @@ const texture = mountTextureLab({
   storagePrefix: "mibbit-tools",
 });
 
-// One launcher in Mibbit's bottom bar (empty on the left) instead of floating pills; ⌥E ⌥C ⌥D ⌥T, ⌥H hides all.
+// The Type Lab: any Google web font per role, sized and weighted, kept as named type styles.
+const D = "--font-display", M = "--font-mono", S = "--font-sans", B = "--font-bitmap", L = "--font-lcd";
+const type = mountTypeLab({
+  rules: MIBBIT_RULES,
+  launcher: false,
+  site: {
+    appName: "Mibbit",
+    roles: [
+      { token: D, label: "Display", sample: "KICK 01 · SWING 54", hint: "Titles, tabs, pad names and caps labels" },
+      { token: M, label: "Interface", sample: "Pads  Steps  Mixer  128 BPM", hint: "Most of the UI: controls, values, menus" },
+      { token: S, label: "Text", sample: "Describe a sound and Mibbit makes it.", hint: "Sentences: prompts, help, dialogs" },
+      { token: B, label: "Readouts", sample: "120.0  01.03.04", hint: "BPM and transport readouts" },
+      { token: L, label: "LCD digits", sample: "88:88  128", hint: "Seven-segment displays" },
+    ],
+    tracking: ["--tracking-caps", "--tracking-caps-wide"],
+    presets: [
+      { id: "p-swiss", name: "Swiss hardware", why: "Clean grotesk labels over a plain mono, like a Braun or Dieter Rams panel.", roles: { [D]: { family: "Space Grotesk", size: 104, weight: 100 }, [M]: { family: "IBM Plex Mono" }, [S]: { family: "Inter Tight" } }, tracking: 0.8 },
+      { id: "p-terminal", name: "Terminal", why: "A phosphor terminal: VT323 for the big type, JetBrains Mono for the rest.", roles: { [D]: { family: "VT323", size: 128 }, [M]: { family: "JetBrains Mono", size: 96 }, [B]: { family: "VT323", size: 120 } } },
+      { id: "p-instrument", name: "Instrument panel", why: "Wide, engraved-looking caps (Michroma) with a soft mono, like lab test gear.", roles: { [D]: { family: "Michroma", size: 86 }, [M]: { family: "DM Mono" }, [S]: { family: "DM Sans" } }, tracking: 1.3 },
+      { id: "p-pixel", name: "Pixel", why: "Bitmap type everywhere it can read: Silkscreen labels, Pixelify readouts.", roles: { [D]: { family: "Silkscreen", size: 92 }, [B]: { family: "Pixelify Sans", size: 110 }, [M]: { family: "Martian Mono", size: 92 } } },
+      { id: "p-editorial", name: "Editorial", why: "A serif voice for sentences, a precise mono for the machine.", roles: { [S]: { family: "Newsreader", size: 108 }, [D]: { family: "Instrument Sans", weight: 100 }, [M]: { family: "Fragment Mono" } } },
+    ],
+  },
+  endpoint: window.__pageEditorLive?.endpoint ?? "http://127.0.0.1:5198/__page-editor",
+  storagePrefix: "mibbit-tools",
+});
+
+// One launcher in Mibbit's bottom bar (empty on the left) instead of floating pills; ⌥E ⌥C ⌥D ⌥T ⌥F, ⌥H hides all.
 mountDock({
   storagePrefix: "mibbit-tools",
   // Side by side, these full-window rules (width: 100vw) size to the app's half instead.
@@ -88,5 +116,6 @@ mountDock({
     ...(colour ? [{ label: "Colour", icon: "◐", code: "KeyC", host: "colour-lab", control: colour }] : []),
     ...(design ? [{ label: "Design", icon: "✦", code: "KeyD", host: "design-generator", control: design }] : []),
     ...(texture ? [{ label: "Texture", icon: "◍", code: "KeyT", host: "texture-lab", control: texture }] : []),
+    ...(type ? [{ label: "Type", icon: "Aa", code: "KeyF", host: "type-lab", control: type }] : []),
   ],
 });
