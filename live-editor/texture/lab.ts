@@ -104,6 +104,12 @@ details.rules li button { padding: 0 5px; border: 0; background: none; color: #7
 .strength output { font-variant-numeric: tabular-nums; color: #c8d2df; font-weight: 700; min-width: 38px; text-align: right; }
 textarea { font: 500 12px/1.35 inherit; font-family: inherit; color: #f3f6fa; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 6px 8px; width: 100%; resize: vertical; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pics:empty { display: none; }
+.pic { position: relative; width: 64px; height: 64px; border-radius: 7px; overflow: hidden; border: 1px solid rgba(255,255,255,.18); background: #000 center / cover no-repeat; }
+.pic.wait { display: grid; place-items: center; font-size: 10px; color: #c8d2df; }
+.pic .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border-radius: 999px; font-size: 11px; line-height: 1; background: rgba(0,0,0,.7); }
+.make.drag { outline: 2px dashed ${ACCENT}; outline-offset: 4px; border-radius: 8px; }
 .chips button { padding: 4px 8px; font-size: 11px; border-radius: 999px; }
 .head, .status, .foot, .applied { flex: none; }
 .status { min-height: 16px; color: #bff3e6; font-size: 11px; padding: 0 12px 8px; }
@@ -137,9 +143,12 @@ const HTML = `
       <h4>Strength</h4>
       <div class="strength"><small class="note">Faint</small><input type="range" min="0" max="160" step="5" data-in="strength"><output data-out="strength"></output></div>
     </section>
-    <section>
+    <section class="make">
       <h4>Make your own</h4>
       <textarea data-in="ask" rows="3" placeholder="Describe a texture, e.g. worn rubber from an old drum machine, slightly chalky, no shine"></textarea>
+      <div class="pics" data-out="pics"></div>
+      <div class="row" style="margin-top:6px"><button data-act="add-pic" title="Or paste an image (⌘V) or drop one here">＋ Image</button><small class="note">Paste (⌘V) or drop pictures of the look you want</small></div>
+      <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden data-in="pic-file">
       <div class="chips" data-out="asks" style="margin-top:6px"></div>
       <div class="row" style="margin-top:8px"><button class="primary" data-act="make">◍ Make 3 textures</button><button data-act="more" title="Three more, different from yours">More</button></div>
       <div class="grid" data-out="custom" style="margin-top:8px"></div>
@@ -164,6 +173,7 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
   const stateKey = `${storagePrefix}:texture:state`;
   const customKey = `${storagePrefix}:texture:custom`;
   const openKey = `${storagePrefix}:texture:open`;
+  const picsKey = `${storagePrefix}:texture:pics`;
   const load = <T>(key: string, fallback: T): T => {
     try {
       const raw = localStorage.getItem(key);
@@ -203,6 +213,9 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
     excluded: saved.excluded ?? [],
   };
   let custom: Texture[] = load<Texture[]>(customKey, []);
+  /** Pictures of the look the designer wants (kept by the helper; thumbs here). */
+  let pics: { id: string; thumb: string }[] = load(picsKey, []);
+  let picsLoading = 0;
   let found: Found[] = [];
   let shared = 0;
   let preview: string | null = null;
@@ -390,6 +403,9 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
     out("on-name").textContent = byId(state.on)?.name ?? "";
     strengthIn.value = String(Math.round(state.strength * 100));
     out("strength").textContent = `${Math.round(state.strength * 100)}%`;
+    out("pics").innerHTML =
+      pics.map((p) => `<div class="pic" style="background-image:url('${p.thumb}')" title="Claude looks at this when you make textures"><button class="x" data-act="drop-pic" data-pic="${p.id}" title="Remove">×</button></div>`).join("") +
+      '<div class="pic wait">adding…</div>'.repeat(picsLoading);
     out("asks").innerHTML = site.asks.map((a) => `<button data-ask="${esc(a)}">${esc(a)}</button>`).join("");
     out("applied").innerHTML = appliedRow(writer.last, esc);
     $<HTMLButtonElement>("[data-act=save]").disabled = !state.on || busy;
@@ -429,13 +445,13 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
 
   async function make(more: boolean) {
     const ask = askBox.value.trim();
-    if (!ask) return say("Describe a texture first, or tap a quick pick.", true);
+    if (!ask && !pics.length) return say("Describe a texture, paste a picture, or tap a quick pick.", true);
     if (busy) return;
     busy = true;
     const btn = $<HTMLButtonElement>("[data-act=make]");
     btn.disabled = true;
     btn.textContent = "Mixing…";
-    say("Claude is mixing three textures (about 30–60 seconds).");
+    say(pics.length ? `Claude is looking at your ${pics.length === 1 ? "picture" : `${pics.length} pictures`} and mixing three textures (about a minute).` : "Claude is mixing three textures (about 30–60 seconds).");
     try {
       const cs = getComputedStyle(document.documentElement);
       const sample = (c: Cat) =>
@@ -448,6 +464,7 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           ask,
+          images: pics.map((p) => p.id),
           roles: Object.fromEntries(Object.entries(ROLES).map(([k, name]) => [k, `${name}: ${cs.getPropertyValue(name).trim().replace(/\s+/g, " ").slice(0, 300)}`])),
           inventory: CATS.map((c) => [`${c.label}: ${c.id === "shared" ? shared : found.filter((f) => f.cats.includes(c.id)).length} rules`, ...(c.id === "shared" ? [] : sample(c.id))].join("\n")).join("\n\n"),
           surfaces: ["--surface-base", "--surface-raised", "--surface-raised-hi", "--surface-recessed"].map((n) => `${n}: ${cs.getPropertyValue(n).trim()}`).join("\n"),
@@ -573,6 +590,13 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
     if (act === "more") return void make(true);
     if (act === "save") return void save();
     if (act === "undo-apply") return void undoApply();
+    if (act === "add-pic") return $<HTMLInputElement>("[data-in=pic-file]").click();
+    if (act === "drop-pic") {
+      const id = t.closest<HTMLElement>("[data-pic]")!.dataset.pic!;
+      pics = pics.filter((p) => p.id !== id);
+      store(picsKey, pics);
+      return render();
+    }
     if (act === "exclude") {
       e.preventDefault();
       const key = t.closest<HTMLElement>("[data-key]")!.dataset.key!;
@@ -607,6 +631,12 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
     k.stopPropagation();
   });
   root.addEventListener("change", (e) => {
+    const file = (e.target as HTMLElement).closest<HTMLInputElement>("[data-in=pic-file]");
+    if (file) {
+      void addPics([...(file.files ?? [])]);
+      file.value = "";
+      return;
+    }
     const box = (e.target as HTMLElement).closest<HTMLInputElement>("[data-cat-box]");
     if (!box) return;
     state.cats = { ...state.cats, [box.dataset.catBox as Cat]: box.checked };
@@ -668,6 +698,80 @@ export function mountTextureLab(options: TextureOptions): PanelControl | null {
   });
   document.addEventListener("keyup", (e) => {
     if (e.code === "KeyO") hold(false);
+  });
+
+  // ---- pictures: paste anywhere while the lab is open, drop on Make your own, or ＋ Image
+
+  const MAX_PICS = 4;
+  const shrink = (file: Blob, edge: number, type: string) =>
+    new Promise<string>((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, edge / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.naturalWidth * k));
+        c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL(type, 0.9));
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("couldn't read that image"));
+      };
+      img.src = url;
+    });
+
+  async function addPics(files: File[]) {
+    const images = files.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
+    if (!images.length) return say("Paste or drop a PNG, JPEG, WebP or GIF.", true);
+    const room = MAX_PICS - pics.length - picsLoading;
+    if (room <= 0) return say(`${MAX_PICS} pictures at most: remove one first.`, true);
+    const take = images.slice(0, room);
+    picsLoading += take.length;
+    render();
+    for (const f of take) {
+      try {
+        // Full detail for Claude (texture lives in the fine grain), small thumb for the panel.
+        const [full, thumb] = await Promise.all([shrink(f, 2000, "image/png"), shrink(f, 160, "image/jpeg")]);
+        const res = await fetch(`${endpoint}/inspiration`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dataUrl: full }) });
+        const data = (await res.json()) as { id?: string; error?: string };
+        if (!res.ok || !data.id) throw new Error(data.error ?? `the helper answered ${res.status}`);
+        if (!pics.some((p) => p.id === data.id)) pics.push({ id: data.id, thumb });
+      } catch (e) {
+        say(`Couldn't add that picture: ${(e as Error).message}. Is the helper running?`, true);
+      } finally {
+        picsLoading--;
+      }
+    }
+    store(picsKey, pics);
+    render();
+    if (pics.length) say(`${pics.length === 1 ? "Picture" : `${pics.length} pictures`} ready. Add words if you like, then Make 3 textures.`);
+  }
+
+  const clipImages = (dt: DataTransfer | null) => [...(dt?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
+  // Window-level so ⌘V works whether the box, the panel or the page has focus — but only while the lab is open
+  // and only when the clipboard holds a picture (pasting text into the app is left alone).
+  window.addEventListener("paste", (e) => {
+    if (panel.hidden) return;
+    const files = clipImages(e.clipboardData);
+    if (!files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void addPics(files);
+  }, true);
+  const makeBox = $(".make");
+  makeBox.addEventListener("dragover", (e) => {
+    if (![...(e.dataTransfer?.types ?? [])].includes("Files")) return;
+    e.preventDefault();
+    makeBox.classList.add("drag");
+  });
+  makeBox.addEventListener("dragleave", () => makeBox.classList.remove("drag"));
+  makeBox.addEventListener("drop", (e) => {
+    e.preventDefault();
+    makeBox.classList.remove("drag");
+    void addPics([...(e.dataTransfer?.files ?? [])]);
   });
 
   // ---- start

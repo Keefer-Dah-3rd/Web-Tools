@@ -614,13 +614,26 @@ function textureSystem(cfg) {
   return parts.join("\n\n");
 }
 
-function texturePrompt(req) {
+/** The designer's pasted pictures for the Texture Lab, as absolute paths Claude can Read. */
+const texturePictures = (cfg, ids) => (Array.isArray(ids) ? ids.slice(0, 4) : []).map((id) => imageFile(cfg, id)).filter(Boolean);
+
+function texturePrompt(req, pictures = []) {
   const raw = (v, max) => String(v ?? "").slice(0, max);
+  const said = clip(req.ask, 600);
   const roles = req.roles && typeof req.roles === "object" ? Object.values(req.roles).map((v) => `- ${raw(v, 320)}`) : [];
   return [
     "## What the designer described",
-    `"${clip(req.ask, 600)}"`,
+    said ? `"${said}"` : "(Nothing in words: the pictures below are the brief.)",
     "",
+    ...(pictures.length
+      ? [
+          "## Pictures of the look the designer wants",
+          "Read every picture below before you write anything. They show the material the designer wants this whole app to be made of. Study only the surface: its grain or weave, how matte or shiny it is, how light falls across it and where the highlights sit, how edges and corners are drawn, how deep things sit, whether it reads printed, moulded, machined or woven. Ignore the pictures' colours, words, logos and layout: this app's colours stay.",
+          "Then write the 3 textures as one family drawn from those pictures (a faithful reading, a quieter one, a bolder one), so the same material runs consistently through every kind of surface in the inventory: raised keys, pressed wells, flush chips, screens, sheen and overlay. In each why, say what in the pictures it takes from.",
+          ...pictures.map((f, i) => `Picture ${i + 1}: ${f}`),
+          "",
+        ]
+      : []),
     "## The shared roles now",
     ...roles,
     "",
@@ -640,10 +653,11 @@ function texturePrompt(req) {
 /** POST <endpoint>/texture: a described finish in, three textures (recipe language) out. */
 export function handleTexture(cfg, req, res) {
   jsonBody(req, res, 200_000, async (data, reply) => {
-    if (!clip(data.ask, 600)) return reply(400, { error: "Describe a texture first." });
+    const pictures = texturePictures(cfg, data.images);
+    if (!clip(data.ask, 600) && !pictures.length) return reply(400, { error: "Describe a texture or paste a picture first." });
     const system = textureSystem(cfg);
-    const prompt = texturePrompt(data);
-    const cli = await askCli(cfg, system, prompt, TEXTURE_SCHEMA);
+    const prompt = texturePrompt(data, pictures);
+    const cli = await askCli(cfg, system, prompt, TEXTURE_SCHEMA, pictures.length ? { readDir: inspirationDir(cfg) } : {});
     if (cli.ok) return reply(200, { ...cli.answer, via: "Claude Code" });
     if (!cfg.sessionFallback) return reply(502, { error: cli.auth ? "Claude Code isn't signed in. Run `claude auth login` in Terminal once." : cli.error });
     const session = await askSession(cfg, system, prompt, TEXTURE_SCHEMA);
