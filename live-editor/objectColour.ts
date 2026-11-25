@@ -10,7 +10,8 @@
  * writes the rules that carry the new colour through the same paint:
  *   - if it paints with chromatic colour variables, those are the app's own idea of the object's
  *     colour: they are set on the object, so every gradient, glow, icon and lit state built from
- *     them follows, shading intact, and a neutral body stays neutral. Otherwise:
+ *     them follows, shading intact, and a neutral body stays neutral. A body built from the variable
+ *     gets the full colour (it may only mix in a hint of it). Otherwise:
  *   - its own gradients (and a painted ::before/::after) are tinted: each stop takes the new hue and
  *     chroma and keeps its own lightness offset and alpha, so a 3D pad stays 3D;
  *   - a solid background becomes the colour;
@@ -207,6 +208,10 @@ export function objectCss(selector: string, plan: ObjectPlan | undefined, hex: s
     // The app already says what this object's colour is: change that, and everything built from it
     // (body, glow, icon, lit states) follows the way the app draws it.
     for (const v of plan.vars) own.push(`${v}: ${hex} !important;`);
+    // A body built from that variable often uses only a hint of it (Mibbit's unlit pads mix in
+    // 8–22%), so it would barely change: give the body the full colour, its shading kept.
+    if (plan.bgByVar && plan.bg === "gradient" && plan.bgImage) own.push(`background-image: ${tint(plan.bgImage, hex)} !important;`);
+    else if (plan.bgByVar && plan.bg === "solid") own.push(`background: ${withAlpha(hex, plan.bgAlpha)} !important;`);
   } else {
     if (plan.bg === "gradient" && plan.bgImage) own.push(`background-image: ${tint(plan.bgImage, hex)} !important;`);
     else if (plan.bg === "solid" || (!reachable(plan) && !plan.canvas)) own.push(`background: ${withAlpha(hex, plan.bgAlpha)} !important;`);
