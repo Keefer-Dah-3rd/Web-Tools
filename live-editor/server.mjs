@@ -28,6 +28,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { build } from "esbuild";
 import { configFor, handleApplied, handleApply, handleInspiration, serveInspiration, handleDesign, handleDesignSave, handleEdits, handlePalette, handlePaletteSave, handleRewrite, handleUndo } from "./core.mjs";
+import { handleShowcase, handleShowcaseSave, serveShowcaseFile, showcaseDir } from "./showcase.mjs";
 
 const ENDPOINT = "/__page-editor";
 
@@ -94,7 +95,7 @@ createServer(async (req, res) => {
   if (origin && origins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     // Chrome asks before a public site may reach a server on this Mac (Private / Local Network Access).
     res.setHeader("Access-Control-Allow-Private-Network", "true");
@@ -118,6 +119,8 @@ createServer(async (req, res) => {
     if (path === `${ENDPOINT}/undo`) return handleUndo(cfg, req, res);
     if (path === `${ENDPOINT}/applied`) return handleApplied(cfg, req, res);
     if (path === `${ENDPOINT}/inspiration`) return handleInspiration(cfg, req, res);
+    if (path === `${ENDPOINT}/showcase` && req.method === "POST") return handleShowcaseSave(cfg, req, res);
+    if (path === `${ENDPOINT}/showcase` || path.startsWith(`${ENDPOINT}/showcase/`)) return handleShowcase(cfg, path.slice(`${ENDPOINT}/showcase/`.length), req, res);
     if (path.startsWith(`${ENDPOINT}/inspiration/`) && req.method === "GET") return serveInspiration(cfg, path.slice(`${ENDPOINT}/inspiration/`.length), res);
   }
   if (path === "/editor.js") {
@@ -132,6 +135,13 @@ createServer(async (req, res) => {
       return res.end(`console.error(${JSON.stringify(`Live editor failed to build: ${e.message}`)});`);
     }
   }
+  // The showcase gallery: open http://127.0.0.1:<port>/showcase (or the index.html in its folder).
+  if (path === "/showcase") {
+    res.statusCode = 302;
+    res.setHeader("location", "/showcase/");
+    return res.end();
+  }
+  if (path.startsWith("/showcase/")) return serveShowcaseFile(cfg, decodeURIComponent(path.slice("/showcase/".length)), res);
   if (path === "/") {
     res.setHeader("content-type", "text/html; charset=utf-8");
     return res.end(helpPage());
@@ -142,5 +152,6 @@ createServer(async (req, res) => {
   console.log(`Live editor helper: ${here}`);
   console.log(`  live site: ${origins.join(", ")}`);
   console.log(`  saves go to: ${cfg.editsDir}`);
+  console.log(`  showcase: ${here}/showcase (files in ${showcaseDir(cfg)})`);
   console.log(`Open ${here} for the bookmark.`);
 });

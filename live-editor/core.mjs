@@ -256,6 +256,8 @@ export function configFor(options, base) {
   const at = (p) => (isAbsolute(p) ? p : resolve(base, p));
   return {
     editsDir: at(options.editsDir ?? "page-edits"),
+    // Design variations saved to show the team (showcase.mjs); default <editsDir>/showcase.
+    showcaseDir: options.showcaseDir ? at(options.showcaseDir) : null,
     brief: options.brief ? at(options.brief) : DEFAULT_BRIEF,
     paletteBrief: options.paletteBrief ? at(options.paletteBrief) : null,
     designBrief: options.designBrief ? at(options.designBrief) : null,

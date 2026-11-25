@@ -104,6 +104,14 @@ textarea, input[type=text] { font: 500 12px/1.35 inherit; font-family: inherit; 
 .card details summary { cursor: pointer; color: #8e9aab; font-size: 10.5px; }
 .card pre { margin: 4px 0 0; max-height: 160px; overflow: auto; font: 500 10.5px/1.35 ui-monospace, Menlo, monospace; color: #cfd8e3; background: rgba(0,0,0,.3); padding: 6px; border-radius: 6px; white-space: pre-wrap; }
 .note { color: #8e9aab; font-size: 11px; margin: 0; }
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.shot { position: relative; display: grid; gap: 3px; padding: 4px; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); cursor: pointer; text-align: left; }
+.shot:hover { border-color: rgba(180,140,255,.6); }
+.shot img, .shot .blank { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-radius: 5px; display: block; background: rgba(0,0,0,.35); }
+.shot .blank { display: grid; place-items: center; color: #7e8a9a; font-size: 10px; }
+.shot b { font-size: 10.5px; font-weight: 600; color: #dfe5ee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shot .x { position: absolute; top: 6px; right: 6px; padding: 0 5px; border: 0; border-radius: 6px; background: rgba(0,0,0,.6); color: #c8d2df; font-size: 11px; line-height: 18px; }
+.shot .x:hover { color: #ff9a8a; }
 .drop { border-radius: 10px; transition: background .15s, outline-color .15s; outline: 2px dashed transparent; outline-offset: 4px; }
 .drop.over { outline-color: #b48cff; background: rgba(180,140,255,.08); }
 ${BOARD_STYLE}
@@ -161,6 +169,13 @@ const HTML = `
       <div class="cards" data-out="variants"></div>
     </section>
     <section>
+      <h4>Showcase <span data-out="shot-count"></span></h4>
+      <p class="note" style="margin-bottom:6px">Save the variation on screen as a screenshot plus its code, to show the team later. The app's code doesn't change.</p>
+      <input type="text" data-in="shot-note" placeholder="Note for the team (optional)" maxlength="300">
+      <div class="row" style="margin-top:6px"><button class="primary" data-act="snap" title="Chrome asks once to see this tab; the tools hide for the shot">📸 Save to showcase</button><button data-act="gallery" title="All saved variations on one page">Gallery ↗</button></div>
+      <div class="shots" data-out="shots" style="margin-top:8px"></div>
+    </section>
+    <section>
       <h4>Kept <span data-out="kept-count"></span></h4>
       <div class="cards" data-out="kept"></div>
     </section>
@@ -187,6 +202,101 @@ const sheet = () => {
   }
   return el;
 };
+
+/** What else was on the page in a showcase save (a Colour Lab preview), put back with it. */
+const extraSheet = () => {
+  let el = document.getElementById("showcase-extra") as HTMLStyleElement | null;
+  if (!el) {
+    el = document.createElement("style");
+    el.id = "showcase-extra";
+    document.head.appendChild(el);
+  }
+  return el;
+};
+
+interface ShowcaseItem {
+  id: string;
+  name: string;
+  why: string;
+  ask: string;
+  url: string;
+  savedAt: string;
+  target: Target;
+  hasScreenshot: boolean;
+  css?: string;
+  alsoOnPage?: string;
+}
+
+/**
+ * One still of this tab as it looks now, through Chrome's own tab capture (it asks once per shot;
+ * nothing to install). The tools hide while it's taken. Null when it was cancelled or can't run.
+ */
+async function captureTab(part: Element | null): Promise<{ screenshot: string; part: string | null } | null> {
+  const media = navigator.mediaDevices as MediaDevices | undefined;
+  if (!media?.getDisplayMedia) return null;
+  let stream: MediaStream;
+  try {
+    stream = await media.getDisplayMedia({
+      video: { displaySurface: "browser" },
+      audio: false,
+      preferCurrentTab: true,
+      selfBrowserSurface: "include",
+      surfaceSwitching: "exclude",
+    } as DisplayMediaStreamOptions);
+  } catch {
+    return null;
+  }
+  const hide = document.createElement("style");
+  hide.textContent = `${TOOL} { visibility: hidden !important; }`;
+  document.head.appendChild(hide);
+  const video = document.createElement("video");
+  try {
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await video.play();
+    // Chrome's "sharing this tab" bar settles and the page repaints without the tools.
+    await new Promise((ok) => window.setTimeout(ok, 700));
+    await new Promise<void>((ok) => {
+      const v = video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => void };
+      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => ok());
+      else window.setTimeout(ok, 120);
+      window.setTimeout(ok, 600);
+    });
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d")!.drawImage(video, 0, 0, w, h);
+    let crop: string | null = null;
+    const r = part?.isConnected ? part.getBoundingClientRect() : null;
+    if (r && r.width > 4 && r.height > 4) {
+      const k = w / innerWidth;
+      const pad = 16;
+      const x = Math.max(0, (r.left - pad) * k);
+      const y = Math.max(0, (r.top - pad) * k);
+      const cw = Math.min(w - x, (r.width + pad * 2) * k);
+      const ch = Math.min(h - y, (r.height + pad * 2) * k);
+      if (cw > 8 && ch > 8) {
+        const c2 = document.createElement("canvas");
+        c2.width = Math.round(cw);
+        c2.height = Math.round(ch);
+        c2.getContext("2d")!.drawImage(canvas, x, y, cw, ch, 0, 0, c2.width, c2.height);
+        crop = c2.toDataURL("image/png");
+      }
+    }
+    return { screenshot: canvas.toDataURL("image/png"), part: crop };
+  } finally {
+    hide.remove();
+    stream.getTracks().forEach((t) => t.stop());
+    video.srcObject = null;
+  }
+}
+
+/** The address without ?showcase=… (leaves ?tools and the rest exactly as they were). */
+const withoutShowcase = (href: string) => href.replace(/([?&])showcase=[^&#]*(&|(?=#)|$)/, (_, lead: string, tail: string) => (tail === "&" ? lead : "")).replace(/\?(#|$)/, "$1");
 
 /** Only CSS that styles: no imports, no outside URLs, no scripts. */
 function cleanCss(css: string): string {
@@ -254,6 +364,10 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   let original = false;
   let busy = false;
   const writer = new CodeWriter(endpoint, storagePrefix, "design");
+  const helperBase = endpoint.replace(/\/__page-editor\/?$/, "");
+  let shots: ShowcaseItem[] = [];
+  /** A variation put back from the showcase, and what else was on the page with it. */
+  let restored: { variant: Variant; extra: string } | null = null;
   askBox.value = last.ask ?? "";
 
   // ---- undo / redo: picking a part, its scope, the variations and which one is on
@@ -613,6 +727,11 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       // A variation may change colour tokens: canvases that resolved theirs once redraw.
       window.dispatchEvent(new Event("palettechange"));
     }
+    const extra = v && restored && v === restored.variant && !original ? restored.extra : "";
+    if (extraSheet().textContent !== extra) {
+      extraSheet().textContent = extra;
+      window.dispatchEvent(new Event("palettechange"));
+    }
     $<HTMLButtonElement>("[data-act=original]").classList.toggle("on", original);
   }
 
@@ -677,6 +796,132 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       btn.disabled = false;
       btn.textContent = "✦ Make 3 variations";
       render();
+    }
+  }
+
+  // ---- showcase: a variation saved as a screenshot and its code, to show the team
+
+  async function loadShots() {
+    try {
+      const res = await fetch(`${endpoint}/showcase`);
+      const data = (await res.json()) as { items?: ShowcaseItem[] };
+      shots = data.items ?? [];
+    } catch {
+      shots = [];
+    }
+    render();
+  }
+
+  /** The link that puts a save back on: its own page, with ?showcase=<id>. */
+  const liveLink = (item: ShowcaseItem) => {
+    const u = new URL(item.url);
+    u.searchParams.set("showcase", item.id);
+    return u.toString();
+  };
+  const samePage = (url: string) => {
+    try {
+      const u = new URL(url);
+      return u.origin === location.origin && u.pathname === location.pathname && u.hash === location.hash;
+    } catch {
+      return false;
+    }
+  };
+
+  async function snap() {
+    const v = on >= 0 ? variants[on] : null;
+    if (!v || !target) return say("Show a variation first; the showcase saves the one on screen.", true);
+    if (busy) return;
+    busy = true;
+    const btn = $<HTMLButtonElement>("[data-act=snap]");
+    btn.disabled = true;
+    original = false;
+    applyVariant();
+    say("Chrome will ask to see this tab: choose this tab and Share. The tools hide for the shot.");
+    try {
+      const shot = await captureTab(target.scope === "app" ? null : element);
+      if (!shot && "getDisplayMedia" in (navigator.mediaDevices ?? {})) return say("Cancelled; nothing saved.");
+      btn.textContent = "Saving…";
+      const extras = ["colour-lab-vars", "live-editor-rules"]
+        .map((id) => document.getElementById(id)?.textContent?.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      const res = await fetch(`${endpoint}/showcase`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          record: {
+            name: v.name,
+            why: v.why,
+            ask: askBox.value.trim(),
+            note: $<HTMLInputElement>("[data-in=shot-note]").value.trim(),
+            url: withoutShowcase(location.href),
+            viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
+            target,
+            css: cleanCss(v.css),
+            cssApplied: scoped(target.selector, v.css),
+            alsoOnPage: extras,
+          },
+          screenshot: shot?.screenshot,
+          part: shot?.part,
+        }),
+      });
+      const data = (await res.json()) as { id?: string; screenshot?: boolean; error?: string };
+      if (!res.ok || !data.id) throw new Error(data.error ?? `The helper answered ${res.status}.`);
+      $<HTMLInputElement>("[data-in=shot-note]").value = "";
+      say(data.screenshot ? `Saved “${v.name}” to the showcase: screenshot and code. Gallery ↗ shows them all.` : `Saved “${v.name}” as code only (this browser can't take the screenshot).`);
+      await loadShots();
+    } catch (e) {
+      say(`Couldn't save to the showcase: ${(e as Error).message}`, true);
+    } finally {
+      busy = false;
+      btn.disabled = false;
+      btn.textContent = "📸 Save to showcase";
+    }
+  }
+
+  /** Put a showcase save back on the app (going to its page first if it was saved on another). */
+  async function showSaved(id: string) {
+    try {
+      const res = await fetch(`${endpoint}/showcase/${encodeURIComponent(id)}`);
+      const item = (await res.json()) as ShowcaseItem & { error?: string };
+      if (!res.ok || !item.css) throw new Error(item.error ?? `The helper answered ${res.status}.`);
+      if (!samePage(item.url)) {
+        location.href = liveLink(item);
+        return;
+      }
+      const variant: Variant = { name: item.name, why: item.why, css: item.css };
+      restored = { variant, extra: item.alsoOnPage ?? "" };
+      target = item.target;
+      element = target.scope === "app" ? document.documentElement : document.querySelector(target.selector);
+      // Straight from a link the app may still be starting: wait up to 15 s for the part to appear.
+      for (let i = 0; !element && i < 30; i++) {
+        await new Promise((ok) => window.setTimeout(ok, 500));
+        element = document.querySelector(target.selector);
+      }
+      variants = [variant];
+      on = 0;
+      original = false;
+      askBox.value = item.ask ?? "";
+      applyVariant();
+      remember();
+      setOpen(true);
+      render();
+      say(`Showing “${item.name}” from the showcase${restored.extra ? ", with the Colour Lab preview it had" : ""}.${element ? "" : " Its part isn't on screen right now."}`);
+    } catch (e) {
+      say(`Couldn't show that save: ${(e as Error).message}`, true);
+    }
+  }
+
+  async function dropShot(id: string) {
+    const item = shots.find((s) => s.id === id);
+    if (!item || !window.confirm(`Delete “${item.name}” from the showcase? Its screenshot and code go too.`)) return;
+    try {
+      const res = await fetch(`${endpoint}/showcase/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`The helper answered ${res.status}.`);
+      say(`Deleted “${item.name}” from the showcase.`);
+      await loadShots();
+    } catch (e) {
+      say(`Couldn't delete it: ${(e as Error).message}`, true);
     }
   }
 
@@ -788,6 +1033,16 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       )
       .join("");
     out("kept-count").textContent = kept.length ? String(kept.length) : "";
+    out("shot-count").textContent = shots.length ? String(shots.length) : "";
+    out("shots").innerHTML = shots
+      .slice(0, 12)
+      .map(
+        (s) => `<div class="shot" data-shot="${esc(s.id)}" role="button" tabindex="0" title="${esc(`${s.name}: ${s.why}`)}\nClick to put it back on the app">
+          ${s.hasScreenshot ? `<img src="${esc(`${helperBase}/showcase/${s.id}/screenshot.png`)}" alt="" loading="lazy">` : `<span class="blank">code only</span>`}
+          <b>${esc(s.name)}</b><button class="x" data-unshot="${esc(s.id)}" title="Delete from the showcase">✕</button></div>`,
+      )
+      .join("");
+    $<HTMLButtonElement>("[data-act=snap]").disabled = busy || on < 0;
     const refCount = (board as ReferenceBoard | undefined)?.count ?? 0;
     out("inspo-count").textContent = refCount ? `${refCount} of 6` : "";
     out("applied").innerHTML = appliedRow(writer.last, esc);
@@ -803,8 +1058,12 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     const vi = t.closest<HTMLElement>("[data-variant]")?.dataset.variant;
     const drop = t.closest<HTMLElement>("[data-drop]")?.dataset.drop;
     const ki = t.closest<HTMLElement>("[data-kept]")?.dataset.kept;
+    const unshot = t.closest<HTMLElement>("[data-unshot]")?.dataset.unshot;
+    const shotId = t.closest<HTMLElement>("[data-shot]")?.dataset.shot;
 
-    if (drop != null) {
+    if (unshot) void dropShot(unshot);
+    else if (shotId) void showSaved(shotId);
+    else if (drop != null) {
       kept.splice(Number(drop), 1);
       store(keptKey, kept);
       render();
@@ -855,6 +1114,8 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       render();
     } else if (act === "keep") keep();
     else if (act === "save") void save();
+    else if (act === "snap") void snap();
+    else if (act === "gallery") window.open(`${helperBase}/showcase/`, "_blank", "noopener");
     else if (act === "undo-apply") void undoApply();
   });
 
@@ -972,6 +1233,13 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     }
   };
   void recover();
+  void loadShots();
+  // A "Show it live" link from the showcase gallery: ?showcase=<id> puts that save back on.
+  const fromLink = new URLSearchParams(location.search).get("showcase");
+  if (fromLink) {
+    history.replaceState(history.state, "", withoutShowcase(location.href));
+    void showSaved(fromLink);
+  }
 
   return { open: () => setOpen(true), close: () => setOpen(false), isOpen: () => !panel.hidden };
 }

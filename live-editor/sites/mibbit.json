@@ -6,6 +6,7 @@
   ],
   "port": 5198,
   "editsDir": "../edits/mibbit",
+  "showcaseDir": "../../../../mibbit/design-showcase",
   "brief": "mibbit-brief.md",
   "facts": [],
   "paletteBrief": "mibbit-palette-brief.md",
