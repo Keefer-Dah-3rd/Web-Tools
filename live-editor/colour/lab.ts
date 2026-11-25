@@ -14,6 +14,7 @@
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
 import type { PanelControl } from "../dock";
 import { BOARD_STYLE, ReferenceBoard } from "../references";
+import { type SiteRules, lockedTokens } from "../site-rules";
 import { HARMONIES, type Harmony, type Lch3, contrast, evenWheel, hexToLch, hueDelta, lchToHex, round, scaleAtHue, scaleFromSeed, turnScale } from "./palette";
 
 export interface ScaleSpec {
@@ -68,6 +69,8 @@ export interface PaletteSite {
 }
 
 export interface LabOptions {
+  /** What the tools leave alone (protected parts, tokens a framework owns at runtime). */
+  rules?: SiteRules;
   /** Show the panel's own pill. Off when a dock opens it instead. Default on. */
   launcher?: boolean;
   site: PaletteSite;
@@ -348,6 +351,10 @@ export function mountColourLab(options: LabOptions): PanelControl | null {
 
   // The app's own scales, read before the lab overrides anything.
   const tokenHex = (token: string) => cssToHex(rootStyle.getPropertyValue(token)) ?? "#000000";
+  // Accents a framework sets over the app's tokens can't be themed from here: their value in the
+  // tokens file never reaches the screen. Leave them out.
+  const locked = lockedTokens(options.rules);
+  site.accents = (site.accents ?? []).filter((a) => !locked.has(a.token));
   const ref: Scales = {
     brand: read(site.brand),
     casing: read(site.casing),

@@ -38,6 +38,24 @@
         "src/engine/__tests__/padColors.test.ts"
       ],
       "checkIn": "web"
+    },
+    "guard": {
+      "protectFiles": [
+        "web/src/ui/mascot/",
+        "web/src/domain/mascot/",
+        "web/src/ui/DemoCursor.tsx",
+        "web/src/styles/index.css",
+        "web/tailwind.config.js",
+        "web/tailwind.config.ts"
+      ],
+      "protectWords": [
+        "mibbit-orb",
+        "fold-orb",
+        "data-orb",
+        "demo-cursor",
+        "--mascot-",
+        "--nibbit-"
+      ]
     }
   }
 }

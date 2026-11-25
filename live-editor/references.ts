@@ -80,6 +80,8 @@ export interface BoardOptions {
   onChange?: () => void;
   /** What a reference added from this tool learns by default, e.g. ["colour"] in a colour tool. */
   defaultAspects?: string[];
+  /** Parts never to capture (a protected mascot, say). */
+  skip?: (el: Element) => boolean;
 }
 
 /** The plain description of app parts: what they are, their words, their colours, type and box. */
@@ -568,7 +570,7 @@ export class ReferenceBoard {
     const found: Element[] = [];
     const walk = (el: Element) => {
       for (const child of el.children) {
-        if (child.hasAttribute("data-review-tool") || child.tagName === "SCRIPT" || child.tagName === "STYLE") continue;
+        if (child.hasAttribute("data-review-tool") || child.tagName === "SCRIPT" || child.tagName === "STYLE" || this.opts.skip?.(child)) continue;
         if (inside(child)) found.push(child);
         else walk(child);
         if (found.length >= 12) return;

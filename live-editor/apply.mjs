@@ -253,6 +253,8 @@ async function applyPalette(cfg, save, untrackedBefore) {
 
     const files = [...before.keys()];
     const changed = await changedFiles(cfg, untrackedBefore);
+    const breach = await guardBreach(cfg, changed.filter((f) => files.includes(f)));
+    if (breach) throw new Error(`${breach} The palette wasn't applied.`);
     const what = [
       Object.keys(save.scales ?? {}).length && `${Object.keys(save.scales).length} scale(s)`,
       Object.keys(save.roles ?? {}).length && `${Object.keys(save.roles).length} accent colour(s)`,
@@ -268,6 +270,18 @@ async function applyPalette(cfg, save, untrackedBefore) {
 }
 
 // ---- design and page edits: Claude Code
+
+/** What every code change must leave alone (the site's apply.guard), as words for Claude. */
+const guardText = (cfg, save) => {
+  const g = cfg.apply.guard ?? {};
+  const lines = [];
+  if (g.protectFiles?.length) lines.push(`- Don't change ${g.protectFiles.join(", ")}.`);
+  if (g.protectWords?.length) lines.push(`- Don't change any rule, token or line about ${g.protectWords.join(", ")}: the mascot keeps exactly the look it has now (its own design system comes later).`);
+  lines.push("- Don't add Tailwind utility classes, @apply, @theme, @tailwind or Tailwind config; style through the app's own CSS and tokens.");
+  const locked = Array.isArray(save.locked) ? save.locked : [];
+  if (locked.length) lines.push(`- Don't change these tokens (Tailwind's theme sets them at runtime, so the tokens file can't): ${locked.join(", ")}.`);
+  return `\n\nLeave alone:\n${lines.join("\n")}`;
+};
 
 const designPrompt = (save, json) => save.target?.scope === "app" ? appDesignPrompt(json) : `You are applying a design variation that the designer tried live in the running app and chose to keep. Here is the save:
 
@@ -320,7 +334,7 @@ When done, reply with one or two plain sentences saying what changed, and anythi
 
 async function applyWithClaude(cfg, kind, save, untrackedBefore) {
   const json = JSON.stringify(save, null, 2).slice(0, 60_000);
-  const prompt = kind === "design" ? designPrompt(save, json) : pagePrompt(save, json);
+  const prompt = (kind === "design" ? designPrompt(save, json) : pagePrompt(save, json)) + guardText(cfg, save);
   const allowed = kind === "design" ? ["web/src/styles/**"] : ["web/src/**"];
   const answer = await claudeEdits(cfg, prompt);
   let changed = await changedFiles(cfg, untrackedBefore);
@@ -335,6 +349,11 @@ async function applyWithClaude(cfg, kind, save, untrackedBefore) {
   if (outside.length) {
     await putBack(cfg, changed, untrackedBefore);
     throw new Error(`Claude changed files it shouldn't (${outside.join(", ")}), so nothing was kept.`);
+  }
+  const breach = await guardBreach(cfg, changed);
+  if (breach) {
+    await putBack(cfg, changed, untrackedBefore);
+    throw new Error(`${breach} Nothing was kept.`);
   }
   const broken = await typecheck(cfg, changed);
   if (broken) {
@@ -372,6 +391,23 @@ async function applyWithClaude(cfg, kind, save, untrackedBefore) {
   const title = kind === "design" ? `Design: ${save.name} (${save.target?.scope === "app" ? "whole app" : save.target?.label})` : `Page edits: ${save.page} (${save.edits?.length ?? 0} change${save.edits?.length === 1 ? "" : "s"})`;
   const sha = await commit(cfg, changed, title);
   return { commit: sha, files: changed, summary: answer.summary };
+}
+
+/**
+ * Whether a change touched what it must not (apply.guard): protected files, lines about protected
+ * words, or Tailwind machinery. Reads the real diff, not what Claude says it did.
+ */
+async function guardBreach(cfg, changed) {
+  const g = cfg.apply.guard ?? {};
+  const files = changed.filter((f) => (g.protectFiles ?? []).some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p)));
+  if (files.length) return `The change touched ${files.join(", ")}, which the tools leave alone.`;
+  const diff = (await git(cfg, "diff", "-U0", "HEAD", "--", ...changed.filter((f) => existsSync(join(cfg.apply.repo, f))))).stdout;
+  const touched = diff.split("\n").filter((l) => /^[+-](?![+-])/.test(l));
+  const word = (g.protectWords ?? []).find((w) => touched.some((l) => l.includes(w)));
+  if (word) return `The change touched lines about “${word}” (the mascot keeps its look).`;
+  const tailwind = touched.find((l) => l.startsWith("+") && /@apply|@theme|@tailwind|@layer\s+theme|tailwindcss/.test(l));
+  if (tailwind) return "The change added Tailwind machinery (the tools style through the app's own CSS).";
+  return null;
 }
 
 // ---- the queue

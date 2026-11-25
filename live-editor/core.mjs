@@ -529,6 +529,12 @@ function designPrompt(req) {
     "",
     "## Tokens you may use (name: value now)",
     raw(req.tokens, 16000),
+    list(req.locked, 40, 60).length
+      ? ["", "## Read-only tokens", `Tailwind's theme sets these over the app's own at runtime, so changing them can't reach the screen. Use them if you like; never set them: ${list(req.locked, 40, 60).join(", ")}`].join("\n")
+      : "",
+    list(req.protect, 12, 40).length
+      ? ["", "## Never touch", `The mascot keeps exactly the look it has now (its own design system comes later). Write nothing whose selector mentions ${list(req.protect, 12, 40).join(", ")}, nothing that targets canvas, and nothing on & that could change how the mascot looks (filters, zoom, opacity on ancestors).`].join("\n")
+      : "",
     list(req.avoid, 12, 200).length ? ["", "## Already shown (go somewhere different)", ...list(req.avoid, 12, 200).map((a) => `- ${a}`)].join("\n") : "",
     "",
     "Write 3 variations.",

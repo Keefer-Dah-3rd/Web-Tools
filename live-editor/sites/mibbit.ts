@@ -15,6 +15,7 @@ import { MIBBIT_NAMES, MIBBIT_TYPES, mibbitSwatches } from "../../page-editor/pr
 import { mountColourLab } from "../colour/lab";
 import { mountDesignGenerator } from "../design/generator";
 import { mountDock } from "../dock";
+import { MIBBIT_RULES } from "./mibbit-rules";
 import { MIBBIT_DESIGN } from "./mibbit-design";
 import { MIBBIT_PALETTE } from "./mibbit-palette";
 
@@ -25,6 +26,7 @@ const route = (location.hash.replace(/^#\/?/, "") || location.pathname.replace(/
   .slice(0, 40);
 
 mountEditor({
+  rules: MIBBIT_RULES,
   page: route || "studio",
   types: MIBBIT_TYPES,
   swatches: mibbitSwatches(),
@@ -34,6 +36,7 @@ mountEditor({
 
 // The Colour Lab: regenerate the brand and casing scales live (bottom-left pill).
 const colour = mountColourLab({
+  rules: MIBBIT_RULES,
   launcher: false,
   site: MIBBIT_PALETTE,
   endpoint: window.__pageEditorLive?.endpoint ?? "http://127.0.0.1:5198/__page-editor",
@@ -42,6 +45,7 @@ const colour = mountColourLab({
 
 // The Design Generator: three CSS variations of a picked part, tried in place (pill above Colour Lab).
 const design = mountDesignGenerator({
+  rules: MIBBIT_RULES,
   launcher: false,
   site: MIBBIT_DESIGN,
   endpoint: window.__pageEditorLive?.endpoint ?? "http://127.0.0.1:5198/__page-editor",

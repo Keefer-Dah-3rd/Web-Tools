@@ -236,8 +236,8 @@ recolours live, because the lab overrides the scale variables on `:root`.
   `web/src/styles/tokens.css` (see Putting saves into the code below), keeping a record in
   `live-editor/edits/mibbit/palette-<name>.json` (every changed step, the old values, the contrast
   result, and the places that paint the brand with fixed colours).
-- The mascot orb paints with fixed colours, so the lab previews it with a hue filter; the save
-  lists it (and the other fixed crimsons) as needing a code change.
+- The mascot (the orb, his flight, his still image, the tour cursor and its ripples) is left alone
+  on purpose: he keeps today's maroon until his own design system. See "What the tools leave alone".
 
 Code: `live-editor/colour/palette.ts` (the maths, tested in `test/palette.test.ts`),
 `live-editor/colour/lab.ts` (the panel), `live-editor/sites/mibbit-palette.ts` (Mibbit's scales and
@@ -321,3 +321,22 @@ it has text edits to keep in place, and the Design Generator only tracks its out
 Measured on Mibbit playing a beat (10 s, browser pane): 0 ms of long tasks with the tools loaded
 and folded, the same as without them (191 ms before this change). `mountDock` (`live-editor/dock.ts`)
 replaces the panels' own pills (`launcher: false`); without a dock each panel shows its pill.
+
+#### What the tools leave alone (Mibbit)
+
+`live-editor/sites/mibbit-rules.ts` holds what every tool must not change, and the helper checks
+it again against the real diff before anything is committed (`apply.guard` in `mibbit.json`).
+
+- **The mascot** (`[class*="mibbit-orb"]`, its bottom-bar wrapper, `[data-orb]`, the tour cursor
+  `[class*="demo-cursor"]`) keeps exactly today's look: it gets its own design system later. The
+  toolbar won't select him, or scale or remove anything that holds him; Design won't pick or mark
+  him, and leaves out any variation rule that would reach him (or any canvas); the Colour Lab
+  doesn't theme the `--mascot-*` / `--nibbit-*` tokens; code changes that touch his files or rules
+  are refused.
+- **Tailwind**: Mibbit uses a little Tailwind v4, whose `theme` layer comes after Mibbit's own
+  layers, so for any name both define, Tailwind's value is what shows (today `--radius-xs/-sm/-md/-lg`
+  and `--color-white`; the `--font-*` ones match). The tools read those from the page's stylesheets
+  and treat them as read-only: the Colour Lab doesn't theme them, Design leaves out variations that
+  set them, and code changes never write them, never add Tailwind classes, `@apply`, `@theme` or
+  config, and never touch `web/src/styles/index.css`. Handing those tokens back to Mibbit (putting
+  `theme` first in the layer order in `index.css`) changes how the app looks, so it's left to Cris.

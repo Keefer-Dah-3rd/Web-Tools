@@ -9,6 +9,7 @@
  * and live-site saving (the helper's endpoint, reload past the site's cache once published).
  */
 import { slopIn } from "../page-editor/slop";
+import { type SiteRules, holdsProtected, isProtected } from "./site-rules";
 
 interface Edit {
   selector: string;
@@ -50,6 +51,8 @@ export interface SwatchGroup {
 export interface EditorOptions {
   /** Short id for the page, e.g. "home". Edits are stored and saved under it. */
   page: string;
+  /** What the tools leave alone: protected parts can't be selected, and nothing holding one can be scaled or removed. */
+  rules?: SiteRules;
   /** Text styles for the Type style buttons. Default: a plain H1–H4 / Body / Small set. */
   types?: Record<string, TypeStyle>;
   /** Colour swatches. Default: a neutral set. */
@@ -1130,6 +1133,10 @@ export function mountEditor(options: EditorOptions | string): void {
   }
 
   const pick = (el: Element | null) => {
+    if (el && isProtected(opts.rules, el)) {
+      say("That's the mascot: he keeps his look for now (his own design system comes later), so the tools leave him alone.", true);
+      el = null;
+    }
     if (el && !ours(el) && !inScope(el)) say("Only the part of the page that comes from your code can be edited here.", true);
     picked = el && !ours(el) && inScope(el) && el !== document.body && el !== document.documentElement ? el : null;
     render();
@@ -1143,7 +1150,10 @@ export function mountEditor(options: EditorOptions | string): void {
   const setSize = (px: number) => change((e) => (e.fontSize = Math.max(6, Math.round(px * 2) / 2)));
   /** A scale as the toolbar keeps it: 30%–250%, whole percents. */
   const clampScale = (scale: number) => Math.min(2.5, Math.max(0.3, Math.round(scale * 100) / 100));
-  const setScale = (scale: number) => change((e) => (e.scale = clampScale(scale)));
+  const setScale = (scale: number) => {
+    if (reachesMascot()) return;
+    change((e) => (e.scale = clampScale(scale)));
+  };
   const setColour = (hex: string) => {
     peekSheet.textContent = "";
     change((e) => (target === "color" ? (e.color = hex) : (e.fill = hex)));
@@ -1166,6 +1176,7 @@ export function mountEditor(options: EditorOptions | string): void {
     let look: string;
     if (swatch) look = `${target === "color" ? "color" : "background"}: ${swatch.dataset.colour} !important;`;
     else if (typeKey) look = TYPE[typeKey].css.replace(/;/g, " !important;");
+    else if (scaleAct && holdsProtected(opts.rules, picked)) return;
     else if (scaleAct) {
       // The scale a click would give: 5% from the element's own scale (as edited), or as designed.
       const now = editFor(picked, false)?.scale ?? 1;
@@ -1183,8 +1194,14 @@ export function mountEditor(options: EditorOptions | string): void {
     window.clearTimeout(peekOff);
     peekSheet.textContent = "";
   });
+  /** Scaling or removing a part that holds the mascot would change him: refuse. */
+  const reachesMascot = () => {
+    if (!holdsProtected(opts.rules, picked)) return false;
+    say("That holds the mascot, so it can't be scaled or removed (he keeps his look). Pick a part inside it instead.", true);
+    return true;
+  };
   const remove = () => {
-    if (!picked) return;
+    if (!picked || reachesMascot()) return;
     const parent = picked.parentElement;
     change((e) => (e.removed = true));
     say("Removed. Revert it from Changes, or ⌘Z.");
@@ -1544,11 +1561,13 @@ export function mountEditor(options: EditorOptions | string): void {
   window.addEventListener("scroll", follow, { passive: true, capture: true });
   window.addEventListener("resize", follow);
 
-  // On a narrow window it starts folded to a small pill, out of the page's way.
-  if (window.innerWidth < 900) {
-    bar.classList.add("small");
-    $("[data-act=fold]").textContent = "▸";
-  }
+  // On a narrow window it starts folded to a small pill, unless a dock holds it (the dock folds it instead).
+  window.setTimeout(() => {
+    if (window.innerWidth < 900 && !host.hasAttribute("data-docked")) {
+      bar.classList.add("small");
+      $("[data-act=fold]").textContent = "▸";
+    }
+  }, 0);
   history = [JSON.stringify(edits)];
   commit(false);
   if (localStorage.getItem(sentKey)) waitForClaude();

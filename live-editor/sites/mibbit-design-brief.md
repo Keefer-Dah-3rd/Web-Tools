@@ -40,6 +40,15 @@ behaviour. Write it as nested CSS where `&` is the part itself:
   variation changes; don't restate what stays.
 - Keep text contrast: body text on its surface at 4.5:1, indicators at 3:1.
 
+## Leave these alone
+
+- **The mascot** (the Mibbit orb, its flight, its still image, the tour cursor and its ripples)
+  keeps exactly the look it has now: it gets its own design system later. Nothing you write may
+  reach it.
+- **Tailwind**: Mibbit uses a little Tailwind. Never add Tailwind utility classes, `@apply`,
+  `@theme` or Tailwind config. A few tokens are set by Tailwind's theme at runtime (listed as
+  read-only in each request): read them, never set them.
+
 ## When the part is the whole app
 
 The selector is `:root` and `&` is the whole page. Change the app's character everywhere at once:

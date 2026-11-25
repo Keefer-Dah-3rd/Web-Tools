@@ -73,7 +73,8 @@ export const MIBBIT_PALETTE: PaletteSite = {
   ],
   // Scope glass, LCD and OLED (cool grey). --display-bg is cool-950; the hue reads best at 800.
   displays: { prefix: "--cool", label: "Displays", hint: "scope glass, LCD, OLED", anchor: 8 },
-  // The fixed OP-1 accents and the Nibbit character: they keep their brightness and move with the theme.
+  // The fixed OP-1 accents: they keep their brightness and move with the theme. The mascot and Nibbit
+  // tokens stay out: the mascot keeps today's look until his own design system (sites/mibbit-rules.ts).
   accents: [
     { token: "--color-blue", label: "scope cyan", follows: "second" },
     { token: "--color-green", label: "spectrum green", follows: "third" },
@@ -83,15 +84,6 @@ export const MIBBIT_PALETTE: PaletteSite = {
     { token: "--lcd-lit-hi", label: "phosphor highlight", follows: "brand" },
     { token: "--lcd-lit-pale", label: "phosphor pale", follows: "brand" },
     { token: "--color-gold-soft", label: "gold", follows: "brand" },
-    { token: "--nibbit-body", label: "Nibbit body", follows: "second" },
-    { token: "--nibbit-body-lo", label: "Nibbit shade", follows: "second" },
-    { token: "--nibbit-lens", label: "Nibbit lens", follows: "second" },
-    { token: "--nibbit-outline", label: "Nibbit outline", follows: "second" },
-    { token: "--nibbit-mouth", label: "Nibbit mouth", follows: "second" },
-    { token: "--nibbit-led-off", label: "Nibbit LED off", follows: "third" },
-    { token: "--mascot-face", label: "mascot face", follows: "brand" },
-    { token: "--mascot-crown", label: "mascot crown", follows: "brand" },
-    { token: "--mascot-glint", label: "mascot glint", follows: "second" },
   ],
   // The 16 track colours (web/src/engine/padColors.ts mirrors them): turned as one wheel.
   tracks: { tokens: Array.from({ length: 16 }, (_, i) => `--pad-color-${i}`) },
@@ -111,15 +103,6 @@ export const MIBBIT_PALETTE: PaletteSite = {
     ["Garnet", "#8E2433"],
     ["Rust", "#9C3B1B"],
     ["Plum", "#5E2750"],
-  ],
-  // The orb paints from fixed colours (web/src/ui/mascot/EmberPainter.ts sprites and its shader).
-  followers: [{ selector: ".mibbit-orb, .mibbit-orb-still", label: "Mascot orb" }],
-  hardcoded: [
-    "web/src/ui/mascot/EmberPainter.ts: orb sprite colours (rgba 186,0,25 / 229,40,30 / 255,106,77)",
-    "web/src/ui/mascot/OrbStage.ts: orb shader colours",
-    "web/src/domain/mascot/Expressions.ts: PALETTE (orb crimsons, currently unused)",
-    "web/src/ui/explain/highlight.ts, holdToExplain.ts: hold-to-explain ring and text (#BA0019, #FF6A4D)",
-    "web/src/styles/components/walkthrough.css: tour ring (the orb's crimson #BA0019)",
   ],
   moods: ["Deeper maroon", "Warmer", "Less alarm-red", "Late-night studio", "Vintage hardware", "More playful", "Calmer casing"],
 };

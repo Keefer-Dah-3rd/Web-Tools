@@ -11,6 +11,7 @@
 
 import { APPLIED_STYLE, CodeWriter, appliedRow } from "../applied";
 import { BOARD_STYLE, ReferenceBoard } from "../references";
+import { type SiteRules, isProtected, lockedTokens, withoutForbidden } from "../site-rules";
 import type { PanelControl } from "../dock";
 
 export interface DesignSite {
@@ -25,6 +26,8 @@ export interface DesignSite {
 export interface GeneratorOptions {
   /** Show the panel's own pill. Off when a dock opens it instead. Default on. */
   launcher?: boolean;
+  /** What the tools leave alone (protected parts, tokens a framework owns at runtime). */
+  rules?: SiteRules;
   site: DesignSite;
   endpoint: string;
   storagePrefix: string;
@@ -401,8 +404,13 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     say("The whole app. Say what to try: variations restyle the shared tokens and the most-used parts.");
   }
 
-  function choose(el: Element | null) {
-    if (!el) return;
+  /** Make a part the one being designed; false when it can't be (the mascot). */
+  function choose(el: Element | null): boolean {
+    if (!el) return false;
+    if (isProtected(options.rules, el)) {
+      say("That's the mascot: he keeps his look for now (his own design system comes later), so the tools leave him alone.", true);
+      return false;
+    }
     const scope = target?.scope === "one" ? "one" : "all";
     if (target && variants.length && el !== element) {
       variants = [];
@@ -413,6 +421,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
     applyVariant();
     remember();
     render();
+    return true;
   }
 
   function stopPicking() {
@@ -449,8 +458,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       if (!el || ours(el)) return;
       swallow(e);
       stopPicking();
-      choose(el);
-      say("Picked. Say what to try, then Make 3 variations.");
+      if (choose(el)) say("Picked. Say what to try, then Make 3 variations.");
     },
     true,
   );
@@ -513,7 +521,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
   function inventory(): { classes: string[]; text: string } {
     const counts = new Map<string, { n: number; first: Element }>();
     for (const el of document.body.querySelectorAll("*")) {
-      if (el.closest(TOOL)) continue;
+      if (el.closest(TOOL) || isProtected(options.rules, el)) continue;
       const cls = kindClass(el);
       if (!cls || cls.length < 3) continue;
       const c = counts.get(cls);
@@ -638,6 +646,8 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
                 rules: rulesFor(element),
               }),
           tokens: tokensNow(),
+          locked: [...lockedTokens(options.rules)],
+          protect: options.rules?.protectWords ?? [],
           avoid: more ? variants.map((v) => `${v.name}: ${v.why}`) : [],
           references: await board.payload(),
           viewport: { width: innerWidth, height: innerHeight },
@@ -645,7 +655,17 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       });
       const data = (await res.json()) as { variants?: Variant[]; diagnosis?: string; error?: string };
       if (!res.ok || !data.variants) throw new Error(data.error ?? `The helper answered ${res.status}.`);
-      variants = data.variants.filter((v) => v.css?.trim());
+      // Leave out anything that would reach the mascot or set a token the app can't show.
+      const locked = lockedTokens(options.rules);
+      const left = new Set<string>();
+      variants = data.variants
+        .map((v) => {
+          const clean = withoutForbidden(v.css ?? "", options.rules, locked);
+          clean.dropped.forEach((d) => left.add(d));
+          return { ...v, css: clean.css };
+        })
+        .filter((v) => v.css.trim());
+      if (left.size) window.setTimeout(() => say(`Left out of the variations (the mascot, or tokens Tailwind sets): ${[...left].slice(0, 4).join(", ")}${left.size > 4 ? "…" : ""}.`), 50);
       on = variants.length ? 0 : -1;
       applyVariant();
       remember();
@@ -686,6 +706,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
           target: { ...target, markup: target.scope === "app" ? "" : markupOf(element) },
           css: cleanCss(v.css),
           references: await board.payload(),
+          locked: [...lockedTokens(options.rules)],
         }),
       });
       const data = (await res.json()) as { file?: string; name?: string; canApply?: boolean; error?: string };
@@ -872,7 +893,7 @@ export function mountDesignGenerator(options: GeneratorOptions): PanelControl | 
       .join("\n");
     return { label, styles: `${parts}\n\nThe app's CSS rules for them:\n${rulesForClasses([...classes]).slice(0, 8000)}` };
   };
-  board = new ReferenceBoard({ endpoint, storagePrefix, say, describeParts, onChange: () => render() });
+  board = new ReferenceBoard({ endpoint, storagePrefix, say, describeParts, onChange: () => render(), skip: (el) => isProtected(options.rules, el) });
   board.mount(out("refs"));
   const addImages = (files: File[]) => board.addFiles(files);
 
