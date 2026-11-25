@@ -29,6 +29,8 @@ export interface ObjectPlan {
   vars: string[];
   /** Whether its own background (or a painted pseudo-element) is built from one of those variables. */
   bgByVar: boolean;
+  /** Pseudo-elements painted from those variables in another state (a lit pad's fill), and which. */
+  stateLayers?: { which: Pseudo; vars: string[] }[];
   /** Its own background: "solid" colour, a "gradient" to tint, or "none" painted. */
   bg: "solid" | "gradient" | "none";
   /** The solid background's alpha, when bg is "solid" (a glass panel stays see-through). */
@@ -112,35 +114,58 @@ const paintVars = (el: Element, sheets: Iterable<CSSStyleSheet>) => {
     }
   };
   scan(`;${inline}`, null);
+  /**
+   * State layers: a ::before/::after this element paints from a colour variable in a state it may
+   * not be in now (Mibbit's lit pad fill is `.sc-cell[data-on]::before`). Found by matching the
+   * rule with the state taken off the element's own part ([attr], :hover, :focus… at its end).
+   */
+  const layers = new Map<string, Set<string>>();
+  const tryMatch = (selector: string) => {
+    try {
+      return el.matches(selector);
+    } catch {
+      return false; // a selector this browser can't test
+    }
+  };
   for (const rule of styleRules(sheets)) {
     for (const part of rule.selectorText.split(",")) {
       const pseudo = part.match(/::?(before|after)\b/)?.[1] ?? null;
       const own = part.replace(/::?(?:before|after)\b/g, "").trim() || "*";
-      let hit = false;
-      try {
-        hit = el.matches(own);
-      } catch {
-        /* a selector this browser can't test */
+      const hit = tryMatch(own);
+      if (hit) scan(`;${rule.style.cssText}`, pseudo && `::${pseudo}`);
+      if (!pseudo) {
+        if (hit) break;
+        continue;
       }
-      if (hit) {
-        scan(`;${rule.style.cssText}`, pseudo && `::${pseudo}`);
-        break;
-      }
+      // Take the state off the last compound only: `.a .b[data-on]:hover` → `.a .b`.
+      const bare = own.replace(/(?:\[[^\]]*\]|:(?:hover|focus|focus-visible|focus-within|active|checked|disabled|not\([^)]*\)))+$/, "").trim();
+      if (!hit && (bare === own || !bare || !tryMatch(bare))) continue;
+      const names = [...rule.style.cssText.matchAll(PAINT_DECL)].filter(([, prop]) => prop.startsWith("background")).flatMap(([, , value]) => [...value.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]));
+      if (!names.length) continue;
+      const set = layers.get(`::${pseudo}`) ?? new Set<string>();
+      names.forEach((n) => set.add(n));
+      layers.set(`::${pseudo}`, set);
+      break;
     }
   }
-  return { all, inBackground };
+  return { all, inBackground, layers };
 };
 
 /** How this object is painted. Read it before any override of ours is on it. */
 export function planFor(el: Element, selectorOf: (el: Element) => string, rules: SiteRules | undefined, skip: (CSSStyleSheet | null)[] = []): ObjectPlan {
   const sheets = [...document.styleSheets].filter((sh) => !skip.includes(sh));
   const cs = getComputedStyle(el);
-  const { all, inBackground } = paintVars(el, sheets);
+  const { all, inBackground, layers } = paintVars(el, sheets);
   const vars = [...all].filter((name) => {
     const value = cs.getPropertyValue(name).trim();
     return !!value && CSS.supports("color", value) && isChromatic(value);
   });
   const bgByVar = vars.some((v) => inBackground.has(v));
+  const chromaticVar = (name: string) => {
+    const value = cs.getPropertyValue(name).trim();
+    return !!value && CSS.supports("color", value) && isChromatic(value);
+  };
+  const stateLayers = [...layers].map(([which, names]) => ({ which: which as Pseudo, vars: [...names].filter(chromaticVar) })).filter((l) => l.vars.length);
 
   const image = cs.backgroundImage;
   const bg = image && image !== "none" && /gradient/.test(image) ? "gradient" : paints(cs.backgroundColor) ? "solid" : "none";
@@ -171,7 +196,7 @@ export function planFor(el: Element, selectorOf: (el: Element) => string, rules:
 
   const canvas = el.tagName === "CANVAS" || !!el.querySelector("canvas");
   const bgAlpha = bg === "solid" ? (oklchOf(cs.backgroundColor)?.a ?? 1) : undefined;
-  return { vars, bgByVar, bg, bgAlpha, bgImage: bg === "gradient" ? image : undefined, glow, pseudos, shapes, canvas, guard: holdsProtected(rules, el) || undefined };
+  return { vars, bgByVar, stateLayers, bg, bgAlpha, bgImage: bg === "gradient" ? image : undefined, glow, pseudos, shapes, canvas, guard: holdsProtected(rules, el) || undefined };
 }
 
 /** Whether the plan found anything CSS can recolour (beyond a plain box fill). */
@@ -199,6 +224,14 @@ export const tint = (value: string, hex: string, onlyChromatic = false): string 
 /** The colour at a paint's own alpha (opaque stays a plain hex). */
 const withAlpha = (hex: string, alpha: number | undefined) => (alpha == null || alpha >= 0.99 ? hex : `rgb(from ${hex} r g b / ${+alpha.toFixed(3)})`);
 
+/** The lit version of a colour: clearly lighter and a touch more vivid; a very light colour goes to near-white. */
+const brighter = (hex: string) => {
+  const k = oklchOf(hex);
+  if (!k) return hex;
+  const l = Math.min(0.97, k.l + Math.max(0.12, (1 - k.l) * 0.55));
+  return `oklch(${l.toFixed(3)} ${(k.c * 1.15).toFixed(4)} ${k.h.toFixed(2)})`;
+};
+
 /** The rules that put `hex` on the object, through the paint the plan found. */
 export function objectCss(selector: string, plan: ObjectPlan | undefined, hex: string): string {
   if (!plan) return `${selector} { background: ${hex} !important; }`;
@@ -212,6 +245,13 @@ export function objectCss(selector: string, plan: ObjectPlan | undefined, hex: s
     // 8–22%), so it would barely change: give the body the full colour, its shading kept.
     if (plan.bgByVar && plan.bg === "gradient" && plan.bgImage) own.push(`background-image: ${tint(plan.bgImage, hex)} !important;`);
     else if (plan.bgByVar && plan.bg === "solid") own.push(`background: ${withAlpha(hex, plan.bgAlpha)} !important;`);
+    // With the body now in the full colour, a lit layer drawn in that same colour wouldn't stand
+    // out: it gets a brighter, more vivid version (its own variables, so the app's playhead flash
+    // and velocity height still work on top).
+    if (plan.bgByVar) {
+      const lit = brighter(hex);
+      for (const layer of plan.stateLayers ?? []) out.push(`${selector}${layer.which} { ${layer.vars.map((v) => `${v}: ${lit} !important;`).join(" ")} }`);
+    }
   } else {
     if (plan.bg === "gradient" && plan.bgImage) own.push(`background-image: ${tint(plan.bgImage, hex)} !important;`);
     else if (plan.bg === "solid" || (!reachable(plan) && !plan.canvas)) own.push(`background: ${withAlpha(hex, plan.bgAlpha)} !important;`);
